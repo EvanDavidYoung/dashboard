@@ -1,12 +1,13 @@
-# Anki Dashboard
+# Mandarin Dashboard
 
-Personal dashboard displaying Anki study stats and weather. Built with Flask + vanilla JS.
+Personal dashboard for Mandarin study — Anki flashcard stats, Chinese podcast listening time, and weather. Built with Flask + vanilla JS.
 
 ## Requirements
 
 - Python 3.12+
 - [Anki](https://apps.ankiweb.net/) running with the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on (listens on `localhost:8765`)
 - [uv](https://github.com/astral-sh/uv) for package management
+- [overcast-to-sqlite](https://github.com/hbmartin/overcast-to-sqlite) (optional) for podcast stats — exports Overcast data to `overcast.db`
 
 ## Running
 
@@ -22,6 +23,7 @@ Open `http://localhost:5555` in a browser.
 |---|---|---|
 | `REFRESH_API_KEY` | *(unset)* | Protects the `/sync` endpoint. If unset, sync is unprotected. |
 | `WEATHER_LOCATION` | `Taipei` | City name passed to wttr.in for weather data. |
+| `OVERCAST_DB` | `overcast.db` | Path to the overcast-to-sqlite database file. |
 | `PORT` | `5555` | Port the server listens on. |
 
 ## Features
@@ -33,6 +35,16 @@ Open `http://localhost:5555` in a browser.
 - **Sync button** — Triggers AnkiWeb sync via AnkiConnect.
 
 The deck is set to `Mandarin HSK 1000-5000` by default (edit `state.deck` in `index.html` to change it).
+
+### Chinese podcast listening
+- **Listening heatmap** — Daily listening time calendar (orange/yellow gruvbox scale, 2h = max color). Navigate years with ◄/►. Refresh button re-checks for newly cached episode durations.
+- **Per-show breakdown** — Horizontal bar chart of hours + episode count per show, sorted by total time.
+- **Total hours** — All-time listening hours shown inside the podcast widget.
+
+Episode durations are fetched from RSS on first load and cached permanently in `episode_durations` (SQLite). Subsequent loads are pure SQL (~0.2s). `userUpdatedDate` timestamps are used to assign episodes to calendar days; daily totals are capped at 24h to prevent bulk sync artifacts from inflating a single day.
+
+### Total Chinese Time
+Combined widget showing all-time Anki hours + podcast listening hours with a single summed total.
 
 ### Weather
 Current conditions for the configured city via [wttr.in](https://wttr.in) (no API key required). Contextual alerts are shown for:
@@ -54,3 +66,4 @@ Current conditions for the configured city via [wttr.in](https://wttr.in) (no AP
 | `GET` | `/api/today?deck=X` | — | Today's session stats, always current day |
 | `GET` | `/api/total-time?deck=X` | — | All-time total hours studied for a deck |
 | `GET` | `/api/weather` | — | Current weather from wttr.in |
+| `GET` | `/api/podcasts?year=Y` | — | Per-show totals (all-time) + daily heatmap for the year |

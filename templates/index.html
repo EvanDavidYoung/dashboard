@@ -269,7 +269,7 @@
       gap: 6px;
     }
 
-    #year-label {
+    #year-label, #podcast-year-label {
       font-size: 0.83rem;
       font-weight: 600;
       color: var(--fg3);
@@ -324,7 +324,7 @@
       overflow: visible;
     }
 
-    #heatmap-grid {
+    .hm-grid {
       display: grid;
       grid-template-rows: repeat(7, 12px);
       grid-template-columns: repeat(53, 12px);
@@ -346,6 +346,20 @@
     .hm-cell[data-level="4"] { background: #5d9488; }
     .hm-cell[data-level="5"] { background: var(--blue);    } /* #83a598 */
 
+    /* Podcast listening heatmap — gruvbox orange/yellow, max = 2h */
+    .phm-cell {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      background: var(--bg2);
+    }
+
+    .phm-cell[data-level="1"] { background: #3d2b1f; }
+    .phm-cell[data-level="2"] { background: #7c4a15; }
+    .phm-cell[data-level="3"] { background: var(--orange-d); }
+    .phm-cell[data-level="4"] { background: var(--orange); }
+    .phm-cell[data-level="5"] { background: var(--yellow); }
+
     #hm-tooltip {
       position: fixed;
       background: var(--bg-hard);
@@ -358,6 +372,54 @@
       display: none;
       z-index: 100;
       white-space: nowrap;
+    }
+
+    /* ── Podcast widget ──────────────────────────────── */
+    .podcast-total {
+      font-size: 0.82rem;
+      color: var(--fg4);
+      margin-bottom: 14px;
+    }
+
+    .podcast-total b { color: var(--yellow); }
+
+    .podcast-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 8px 12px;
+      margin-bottom: 10px;
+    }
+
+    .podcast-name {
+      font-size: 0.8rem;
+      color: var(--fg2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .podcast-hours {
+      font-size: 0.78rem;
+      color: var(--fg4);
+      white-space: nowrap;
+      text-align: right;
+    }
+
+    .podcast-bar-wrap {
+      grid-column: 1 / -1;
+      background: var(--bg1);
+      border-radius: 3px;
+      height: 5px;
+      margin-top: -6px;
+      overflow: hidden;
+    }
+
+    .podcast-bar {
+      height: 100%;
+      background: var(--blue-d);
+      border-radius: 3px;
+      transition: width 0.4s ease;
     }
 
     /* ── Loading / error ─────────────────────────────── */
@@ -394,14 +456,14 @@
       .total-time-number { font-size: 1.8rem; }
 
       /* Heatmap: smaller cells so the full year needs less scrolling */
-      #heatmap-grid {
+      .hm-grid {
         grid-template-rows:    repeat(7, 10px);
         grid-template-columns: repeat(53, 10px);
       }
-      .hm-months   { grid-template-columns: repeat(53, 10px); height: 13px; }
-      .hm-cell     { width: 10px; height: 10px; }
-      .hm-dow      { grid-template-rows: repeat(7, 10px); padding-top: 15px; }
-      .hm-dow span { line-height: 10px; }
+      .hm-months            { grid-template-columns: repeat(53, 10px); height: 13px; }
+      .hm-cell, .phm-cell   { width: 10px; height: 10px; }
+      .hm-dow               { grid-template-rows: repeat(7, 10px); padding-top: 15px; }
+      .hm-dow span          { line-height: 10px; }
     }
   </style>
 </head>
@@ -443,7 +505,40 @@
     </div>
   </div>
 
-  <!-- 3. Heatmap (bottom) -->
+  <!-- 3. Total Chinese Time (combined) -->
+  <div class="widget" id="chinese-total-widget">
+    <div class="widget-title">Total Chinese Time</div>
+    <div id="chinese-total-content"><p class="placeholder">Loading…</p></div>
+  </div>
+
+  <!-- 4. Chinese Podcasts -->
+  <div class="widget" id="podcasts-widget">
+    <div class="heatmap-header">
+      <span class="widget-title">Chinese Podcasts</span>
+      <div class="year-nav">
+        <button class="btn-icon" id="podcast-year-prev">◄</button>
+        <span id="podcast-year-label">—</span>
+        <button class="btn-icon" id="podcast-year-next">►</button>
+        <button class="btn-icon" id="podcast-refresh" title="Refresh">↺</button>
+      </div>
+    </div>
+    <div id="podcasts-total-block" style="display:none; text-align:center; margin-bottom:14px">
+      <div class="total-time-number" id="podcasts-total-hours">—</div>
+      <div class="total-time-label">total hours of chinese listened</div>
+    </div>
+    <div class="heatmap-wrap" style="margin-bottom:16px">
+      <div class="hm-dow">
+        <span>M</span><span></span><span>W</span><span></span><span>F</span><span></span><span>S</span>
+      </div>
+      <div class="hm-calendar">
+        <div class="hm-months" id="podcast-hm-months"></div>
+        <div id="podcast-heatmap-grid" class="hm-grid"></div>
+      </div>
+    </div>
+    <div id="podcasts-content"><p class="placeholder">Loading…</p></div>
+  </div>
+
+  <!-- 4. Heatmap (bottom) -->
   <div class="widget" id="heatmap-widget">
     <div class="heatmap-header">
       <span class="widget-title">Reviews</span>
@@ -459,7 +554,7 @@
       </div>
       <div class="hm-calendar">
         <div class="hm-months" id="hm-months"></div>
-        <div id="heatmap-grid"></div>
+        <div id="heatmap-grid" class="hm-grid"></div>
       </div>
     </div>
   </div>
@@ -473,6 +568,7 @@
 const state = {
   deck: 'Mandarin HSK 1000-5000',
   year: new Date().getFullYear(),
+  podcastYear: new Date().getFullYear(),
 };
 
 // ── Utility ──────────────────────────────────────────────────────────
@@ -493,11 +589,9 @@ async function apiFetch(url) {
 }
 
 // ── Heatmap ───────────────────────────────────────────────────────────
-function buildHeatmap(heatmap, year) {
-  const grid = document.getElementById('heatmap-grid');
-  const mRow = document.getElementById('hm-months');
-  grid.innerHTML = '';
-  mRow.innerHTML = '';
+function buildHeatmapGrid(gridEl, monthsEl, year, data, levelFn, cellClass, tooltipFmt) {
+  gridEl.innerHTML   = '';
+  monthsEl.innerHTML = '';
 
   const jan1     = new Date(year, 0, 1);
   const startDow = (jan1.getDay() + 6) % 7; // Mon=0…Sun=6
@@ -506,7 +600,7 @@ function buildHeatmap(heatmap, year) {
     for (let row = 0; row < 7; row++) {
       const offset = col * 7 + row - startDow;
       const cell   = document.createElement('div');
-      cell.className = 'hm-cell';
+      cell.className = cellClass;
       cell.style.gridColumn = col + 1;
       cell.style.gridRow    = row + 1;
 
@@ -514,13 +608,14 @@ function buildHeatmap(heatmap, year) {
         const d = new Date(year, 0, 1 + offset);
         if (d.getFullYear() === year) {
           const iso   = d.toISOString().slice(0, 10);
-          const count = heatmap[iso] || 0;
-          if (count > 0) cell.dataset.level = countToLevel(count);
-          cell.dataset.date  = iso;
-          cell.dataset.count = count;
+          const val   = data[iso] || 0;
+          const level = levelFn(val);
+          if (level > 0) cell.dataset.level = level;
+          cell.dataset.date    = iso;
+          cell.dataset.tooltip = tooltipFmt(iso, val);
         }
       }
-      grid.appendChild(cell);
+      gridEl.appendChild(cell);
     }
   }
 
@@ -536,23 +631,31 @@ function buildHeatmap(heatmap, year) {
     span.className = 'hm-month-label';
     span.textContent = months[m];
     span.style.gridColumn = col + 1;
-    mRow.appendChild(span);
+    monthsEl.appendChild(span);
   }
 }
 
-// Tooltip
+function hoursToLevel(h) {
+  if (h <= 0)  return 0;
+  if (h < 0.5) return 1;
+  if (h < 1)   return 2;
+  if (h < 1.5) return 3;
+  if (h < 2)   return 4;
+  return 5;
+}
+
+// Tooltip — shared by all heatmaps
 const tooltip = document.getElementById('hm-tooltip');
-document.getElementById('heatmap-grid').addEventListener('mouseover', e => {
-  const cell = e.target.closest('.hm-cell');
-  if (!cell || !cell.dataset.date) return;
-  const count = cell.dataset.count || '0';
-  tooltip.textContent = `${cell.dataset.date}  —  ${count} review${count == 1 ? '' : 's'}`;
+document.addEventListener('mouseover', e => {
+  const cell = e.target.closest('.hm-cell, .phm-cell');
+  if (!cell || !cell.dataset.tooltip) return;
+  tooltip.textContent   = cell.dataset.tooltip;
   tooltip.style.display = 'block';
 });
-document.getElementById('heatmap-grid').addEventListener('mouseout', e => {
-  if (!e.relatedTarget || !e.relatedTarget.closest('#heatmap-grid')) {
+document.addEventListener('mouseout', e => {
+  const cell = e.target.closest('.hm-cell, .phm-cell');
+  if (cell && !e.relatedTarget?.closest('.hm-cell, .phm-cell'))
     tooltip.style.display = 'none';
-  }
 });
 document.addEventListener('mousemove', e => {
   if (tooltip.style.display === 'none') return;
@@ -599,7 +702,15 @@ const AnkiWidget = {
 
   async refresh() {
     const data = await apiFetch(`/api/stats?deck=${encodeURIComponent(state.deck)}&year=${state.year}`);
-    buildHeatmap(data.error ? {} : data.heatmap, state.year);
+    buildHeatmapGrid(
+      document.getElementById('heatmap-grid'),
+      document.getElementById('hm-months'),
+      state.year,
+      data.error ? {} : data.heatmap,
+      countToLevel,
+      'hm-cell',
+      (iso, val) => `${iso}  —  ${val} review${val == 1 ? '' : 's'}`
+    );
   },
 
   async _loadTotalTime() {
@@ -754,9 +865,103 @@ document.addEventListener('click', e => {
     settingsPanel.classList.remove('open');
 });
 
+// ── Podcast widget ────────────────────────────────────────────────────
+const PodcastWidget = {
+  async init() {
+    document.getElementById('podcast-year-label').textContent = state.podcastYear;
+    await this.refresh();
+  },
+
+  async refresh() {
+    const el   = document.getElementById('podcasts-content');
+    const data = await apiFetch(`/api/podcasts?year=${state.podcastYear}`);
+
+    if (data.error) {
+      el.innerHTML = `<p class="error-msg">${data.error}</p>`;
+      return;
+    }
+
+    // Total hours big display
+    document.getElementById('podcasts-total-hours').textContent = data.total_hours;
+    document.getElementById('podcasts-total-block').style.display = '';
+
+    // Daily listening heatmap
+    buildHeatmapGrid(
+      document.getElementById('podcast-heatmap-grid'),
+      document.getElementById('podcast-hm-months'),
+      state.podcastYear,
+      data.heatmap || {},
+      hoursToLevel,
+      'phm-cell',
+      (iso, val) => `${iso}  —  ${val > 0 ? val.toFixed(1) + 'h' : 'No listening'}`
+    );
+
+    // Per-feed breakdown
+    const maxHours = data.feeds[0]?.hours || 1;
+    el.innerHTML = data.feeds.map(f => `
+      <div class="podcast-row">
+        <span class="podcast-name" title="${f.title}">${f.title}</span>
+        <span class="podcast-hours">${f.hours}h · ${f.episodes_played} ep</span>
+        <div class="podcast-bar-wrap">
+          <div class="podcast-bar" style="width:${(f.hours / maxHours * 100).toFixed(1)}%"></div>
+        </div>
+      </div>
+    `).join('');
+  },
+};
+
+document.getElementById('podcast-year-prev').addEventListener('click', () => {
+  state.podcastYear--;
+  document.getElementById('podcast-year-label').textContent = state.podcastYear;
+  PodcastWidget.refresh();
+});
+document.getElementById('podcast-year-next').addEventListener('click', () => {
+  state.podcastYear++;
+  document.getElementById('podcast-year-label').textContent = state.podcastYear;
+  PodcastWidget.refresh();
+});
+document.getElementById('podcast-refresh').addEventListener('click', () => {
+  PodcastWidget.refresh();
+});
+
+// ── Chinese total widget ──────────────────────────────────────────────
+const ChineseTotalWidget = {
+  async init() { await this.refresh(); },
+
+  async refresh() {
+    const el = document.getElementById('chinese-total-content');
+    const [ankiData, podcastData] = await Promise.all([
+      apiFetch(`/api/total-time?deck=${encodeURIComponent(state.deck)}`),
+      apiFetch('/api/podcasts'),
+    ]);
+
+    const ankiHours    = ankiData.error    ? null : ankiData.total_hours;
+    const podcastHours = podcastData.error ? null : podcastData.total_hours;
+
+    if (ankiHours === null && podcastHours === null) {
+      el.innerHTML = `<p class="error-msg">Could not load data</p>`;
+      return;
+    }
+
+    const total = Math.round(((ankiHours || 0) + (podcastHours || 0)) * 10) / 10;
+
+    el.innerHTML = `
+      <div style="text-align:center">
+        <div class="total-time-number">${total}</div>
+        <div class="total-time-label">combined hours</div>
+        <div style="margin-top:10px; font-size:0.78rem; color:var(--fg4)">
+          <span style="color:var(--blue)">${ankiHours ?? '—'}h</span> flashcards
+          &nbsp;·&nbsp;
+          <span style="color:var(--orange)">${podcastHours ?? '—'}h</span> listening
+        </div>
+      </div>
+    `;
+  },
+};
+
 // ── Widget registry ───────────────────────────────────────────────────
 // Add new widgets here: { init(), refresh() }
-const WIDGETS = [WeatherWidget, TodayWidget, AnkiWidget];
+const WIDGETS = [WeatherWidget, TodayWidget, ChineseTotalWidget, PodcastWidget, AnkiWidget];
 
 Promise.all(WIDGETS.map(w => w.init()));
 </script>

@@ -16,6 +16,9 @@ Endpoints:
 
 import functools
 import os
+import re
+import sqlite3
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -27,6 +30,21 @@ app = Flask(__name__)
 ANKI_CONNECT_URL = "http://localhost:8765"
 API_KEY = os.environ.get("REFRESH_API_KEY", "")
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Taipei")
+OVERCAST_DB = os.environ.get("OVERCAST_DB", "overcast.db")
+
+CHINESE_PODCASTS = [
+    "Dashu Mandarin Podcast",
+    "Howto.Zhongwen好土中文",
+    "Lazy Chinese（Comprehensible Input + TPRS）| Slow Easy Chinese Stories | Simple Chinese",
+    "Learn Mandarin in Mandarin with Huimin",
+    "Learning Chinese through Stories",
+    "MaoMi Chinese",
+    "中級中文 Chinese Level Up",
+    "大鹏说中文 - Speak Chinese with Da Peng",
+    "瞎扯学中文 Convo Chinese",
+    "迷誠品",
+    "思文，败类",
+]
 
 
 def anki_request(action, **params):
@@ -210,6 +228,171 @@ def api_weather():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 502
+
+
+# ── Podcast duration cache ────────────────────────────────────────────
+
+def _overcast_con():
+    if not os.path.exists(OVERCAST_DB):
+        return None
+    con = sqlite3.connect(OVERCAST_DB)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def _ensure_duration_cache(con):
+    """Create the duration cache table if it doesn't exist."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS episode_durations (
+            enclosureUrl TEXT PRIMARY KEY,
+            duration_seconds INTEGER NOT NULL
+        )
+    """)
+    con.commit()
+
+
+def _parse_duration(s):
+    """Parse itunes:duration: HH:MM:SS, MM:SS, or raw integer seconds."""
+    if not s:
+        return None
+    s = s.strip()
+    if re.fullmatch(r"\d+", s):
+        return int(s)
+    parts = s.split(":")
+    try:
+        parts = [int(p) for p in parts]
+        if len(parts) == 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        if len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+    except ValueError:
+        pass
+    return None
+
+
+def _backfill_durations(con, feed_titles):
+    """
+    Fetch RSS for any feed in feed_titles that has played/in-progress
+    episodes missing from the duration cache. Each feed is only fetched
+    when it actually has a gap, and never fetched again once all its
+    episodes are cached.
+    """
+    ns = {"itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd"}
+    placeholders = ",".join("?" * len(feed_titles))
+
+    # Find feeds that have at least one uncached played/in-progress episode
+    gaps = con.execute(f"""
+        SELECT DISTINCT f.title, f.xmlUrl
+        FROM feeds f
+        JOIN episodes e ON e.feedId = f.overcastId
+        WHERE f.title IN ({placeholders})
+          AND (e.played = 1 OR e.progress > 0)
+          AND e.enclosureUrl IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM episode_durations d
+              WHERE d.enclosureUrl = e.enclosureUrl
+          )
+    """, feed_titles).fetchall()
+
+    if not gaps:
+        return  # cache is complete — no network calls needed
+
+    headers = {"User-Agent": "anki-dashboard/1.0"}
+    for row in gaps:
+        try:
+            resp = requests.get(row["xmlUrl"], headers=headers, timeout=15)
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+            rows = []
+            for item in root.iter("item"):
+                enc = item.find("enclosure")
+                dur_el = item.find("itunes:duration", ns)
+                if enc is None or dur_el is None:
+                    continue
+                url = enc.get("url", "").split("?")[0]
+                secs = _parse_duration(dur_el.text)
+                if url and secs:
+                    rows.append((url, secs))
+            con.executemany(
+                "INSERT OR IGNORE INTO episode_durations (enclosureUrl, duration_seconds) VALUES (?, ?)",
+                rows,
+            )
+            con.commit()
+        except Exception:
+            pass  # leave gaps; will retry next request
+
+
+@app.route("/api/podcasts")
+def api_podcasts():
+    con = _overcast_con()
+    if con is None:
+        return jsonify({"error": f"overcast.db not found at {OVERCAST_DB}"}), 404
+
+    try:
+        year = int(request.args.get("year", datetime.now(timezone.utc).year))
+    except ValueError:
+        return jsonify({"error": "year must be an integer"}), 400
+
+    _ensure_duration_cache(con)
+    _backfill_durations(con, CHINESE_PODCASTS)
+
+    placeholders = ",".join("?" * len(CHINESE_PODCASTS))
+    rows = con.execute(f"""
+        SELECT
+            f.title,
+            COUNT(CASE WHEN e.played = 1 THEN 1 END)                    AS episodes_played,
+            COALESCE(SUM(CASE WHEN e.played = 1
+                             THEN d.duration_seconds END), 0)            AS played_seconds,
+            COALESCE(SUM(CASE WHEN e.played = 0 AND e.progress > 0
+                             THEN e.progress END), 0)                    AS partial_seconds
+        FROM feeds f
+        JOIN episodes e ON e.feedId = f.overcastId
+        LEFT JOIN episode_durations d ON d.enclosureUrl = e.enclosureUrl
+        WHERE f.title IN ({placeholders})
+          AND (e.played = 1 OR e.progress > 0)
+        GROUP BY f.title
+        ORDER BY (played_seconds + partial_seconds) DESC
+    """, CHINESE_PODCASTS).fetchall()
+
+    heatmap_rows = con.execute(f"""
+        SELECT
+            DATE(e.userUpdatedDate) AS day,
+            COALESCE(SUM(CASE WHEN e.played = 1 THEN d.duration_seconds ELSE 0 END), 0) +
+            COALESCE(SUM(CASE WHEN e.played = 0 AND e.progress > 0 THEN e.progress ELSE 0 END), 0) AS seconds
+        FROM feeds f
+        JOIN episodes e ON e.feedId = f.overcastId
+        LEFT JOIN episode_durations d ON d.enclosureUrl = e.enclosureUrl
+        WHERE f.title IN ({placeholders})
+          AND (e.played = 1 OR e.progress > 0)
+          AND DATE(e.userUpdatedDate) >= ? AND DATE(e.userUpdatedDate) < ?
+        GROUP BY DATE(e.userUpdatedDate)
+    """, CHINESE_PODCASTS + [f"{year}-01-01", f"{year + 1}-01-01"]).fetchall()
+
+    con.close()
+
+    feeds = []
+    total_seconds = 0
+    for row in rows:
+        secs = row["played_seconds"] + row["partial_seconds"]
+        total_seconds += secs
+        feeds.append({
+            "title":           row["title"],
+            "episodes_played": row["episodes_played"],
+            "hours":           round(secs / 3600, 1),
+        })
+
+    # Cap at 86400s (24h) — excess comes from bulk "mark as played" giving many episodes the same userUpdatedDate
+    heatmap = {
+        row["day"]: round(min(row["seconds"], 86400) / 3600, 2)
+        for row in heatmap_rows
+        if row["day"]
+    }
+
+    return jsonify({
+        "feeds":       feeds,
+        "total_hours": round(total_seconds / 3600, 1),
+        "heatmap":     heatmap,
+    })
 
 
 if __name__ == "__main__":

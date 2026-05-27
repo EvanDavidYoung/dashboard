@@ -17,7 +17,7 @@ Env vars:
 
 ## Architecture
 
-`server.py` is the entire backend — Flask routes proxying AnkiConnect and wttr.in:
+`server.py` is the entire backend — Flask routes proxying AnkiConnect, wttr.in, and an Overcast SQLite database:
 
 | Route | Description |
 |---|---|
@@ -29,10 +29,17 @@ Env vars:
 | `GET /api/today?deck=X` | Today's session stats, always anchored to current-day midnight UTC |
 | `GET /api/total-time?deck=X` | All-time total hours (fetches all reviews with `startID=0`) |
 | `GET /api/weather` | Proxies `wttr.in/{WEATHER_LOCATION}?format=j1`; no external API key needed |
+| `GET /api/podcasts?year=Y` | Per-show totals (all-time) + daily listening heatmap for the year |
 
 All AnkiConnect calls go through `anki_request(action, **params)`, which POSTs to `http://localhost:8765` using the AnkiConnect v6 JSON protocol. Responses are flat lists: `[reviewTime_ms, cardId, usn, ease, ivl, lastIvl, factor, time_ms, type]` — key indices are `[0]` ts, `[3]` ease, `[5]` lastIvl, `[7]` time_ms, `[8]` type.
 
 `/api/stats` and `/api/today` are intentionally separate so year navigation in the heatmap never resets the today's stats display.
+
+### Podcast data (`/api/podcasts`)
+
+Reads from `overcast.db` (produced by `overcast-to-sqlite`). Episode durations are not stored in the Overcast export, so they are fetched from RSS XML on first load and cached permanently in a `episode_durations` table (`enclosureUrl PK, duration_seconds`). The gap query (`NOT EXISTS`) ensures each feed's RSS is only fetched when it has uncached played/in-progress episodes — subsequent requests are pure SQL.
+
+Daily heatmap values use `DATE(e.userUpdatedDate)` for day assignment. Totals per day are capped at 86400s (24h) to prevent bulk "mark as played" sync events from inflating a single day.
 
 ## Frontend (`templates/index.html`)
 
@@ -40,12 +47,14 @@ Self-contained SPA — vanilla JS, no framework, Gruvbox dark color scheme via C
 
 **Widget system**: Each widget is a plain JS object `{ init(), refresh() }` registered in the `WIDGETS` array at the bottom of the `<script>` block. `Promise.all(WIDGETS.map(w => w.init()))` boots them all in parallel. To add a new widget: add its HTML container, implement the object, push to `WIDGETS`.
 
-**Current widgets**:
+**Current widgets** (in render order):
 - `WeatherWidget` — fetches `/api/weather`, renders conditions + contextual alert chips
 - `TodayWidget` — fetches `/api/today`, renders session stats; never re-fetches on year changes
+- `ChineseTotalWidget` — fetches `/api/total-time` + `/api/podcasts` in parallel; shows combined hours with Anki/listening breakdown
+- `PodcastWidget` — fetches `/api/podcasts?year=Y`; renders daily listening heatmap (orange/yellow) + per-show bar chart; year nav + refresh button in header
 - `AnkiWidget` — fetches `/api/stats` for heatmap + `/api/total-time`; year nav only re-calls `refresh()` which updates the heatmap only
 
-**Heatmap**: CSS Grid `repeat(7, 12px)` rows × `repeat(53, 12px)` columns, column-major fill. `startDow = (jan1.getDay() + 6) % 7` aligns Jan 1 to the correct day-of-week. Zero-review cells use `var(--bg2)` (visible warm grey). Active deck is hardcoded as `state.deck = 'Mandarin HSK 1000-5000'`.
+**Heatmap**: Both the Anki and podcast heatmaps share `buildHeatmapGrid(gridEl, monthsEl, year, data, levelFn, cellClass, tooltipFmt)`. CSS class `.hm-grid` sets the 53×7 grid layout. `.hm-cell` uses a blue scale; `.phm-cell` uses an orange/yellow scale (thresholds: 0.5/1/1.5/2h). `startDow = (jan1.getDay() + 6) % 7` aligns Jan 1 to the correct day-of-week.
 
 **Mobile**: `min-width: 0` on `.widget` prevents grid items from overflowing the viewport. `width: 100%` on `.heatmap-wrap` gives `overflow-x: auto` a definite width to scroll within. Breakpoint at 600px.
 
