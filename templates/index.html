@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard</title>
+  <style>
+    /* ── Gruvbox dark palette ─────────────────────────── */
+    :root {
+      --bg-hard:   #1d2021;
+      --bg:        #282828;
+      --bg-soft:   #32302f;
+      --bg1:       #3c3836;
+      --bg2:       #504945;
+      --bg3:       #665c54;
+      --bg4:       #7c6f64;
+      --fg:        #ebdbb2;
+      --fg1:       #d5c4a1;
+      --fg2:       #bdae93;
+      --fg3:       #a89984;
+      --fg4:       #928374;
+      --yellow:    #fabd2f;
+      --yellow-d:  #d79921;
+      --orange:    #fe8019;
+      --orange-d:  #d65d0e;
+      --red:       #fb4934;
+      --red-d:     #cc241d;
+      --green:     #b8bb26;
+      --aqua:      #8ec07c;
+      --blue:      #83a598;
+      --blue-d:    #458588;
+      --purple:    #d3869b;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg-hard);
+      color: var(--fg);
+      min-height: 100vh;
+      padding: 28px 20px 60px;
+    }
+
+    .dashboard {
+      max-width: 900px;
+      margin: 0 auto;
+      display: grid;
+      gap: 12px;
+    }
+
+    /* ── Header ──────────────────────────────────────── */
+    .dash-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2px 6px;
+    }
+
+    .dash-header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--fg);
+      letter-spacing: 0.01em;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #sync-status {
+      font-size: 0.76rem;
+      color: var(--fg4);
+    }
+
+    #sync-status.ok  { color: var(--green); }
+    #sync-status.err { color: var(--red); }
+
+    /* ── Widget card ─────────────────────────────────── */
+    .widget {
+      background: var(--bg);
+      border: 1px solid var(--bg1);
+      border-radius: 8px;
+      padding: 18px 22px;
+      /* Prevent grid item from growing wider than its track */
+      min-width: 0;
+    }
+
+    .widget-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--fg4);
+      margin-bottom: 14px;
+    }
+
+    /* ── Buttons ─────────────────────────────────────── */
+    .btn {
+      background: var(--bg1);
+      border: 1px solid var(--bg2);
+      border-radius: 5px;
+      color: var(--fg1);
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 6px 13px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .btn:hover  { background: var(--bg2); border-color: var(--blue-d); }
+    .btn:active { background: var(--bg-soft); }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      color: var(--fg4);
+      cursor: pointer;
+      font-size: 0.76rem;
+      padding: 4px 7px;
+      border-radius: 4px;
+      transition: color 0.12s;
+    }
+
+    .btn-icon:hover { color: var(--fg); }
+
+    /* ── Settings overlay ────────────────────────────── */
+    .settings-wrap { position: relative; }
+
+    #settings-panel {
+      display: none;
+      background: var(--bg-soft);
+      border: 1px solid var(--bg2);
+      border-radius: 7px;
+      padding: 12px 14px;
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      min-width: 240px;
+      z-index: 50;
+    }
+
+    #settings-panel.open { display: block; }
+
+    .settings-label {
+      font-size: 0.73rem;
+      color: var(--fg4);
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    #api-key-input {
+      width: 100%;
+      background: var(--bg-hard);
+      border: 1px solid var(--bg2);
+      border-radius: 4px;
+      color: var(--fg);
+      font-family: monospace;
+      font-size: 0.8rem;
+      padding: 6px 9px;
+      outline: none;
+    }
+
+    #api-key-input:focus { border-color: var(--blue-d); }
+
+    /* ── Weather widget ──────────────────────────────── */
+    .weather-body {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .weather-icon { font-size: 2rem; line-height: 1; flex-shrink: 0; }
+
+    .weather-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+      min-width: 120px;
+    }
+
+    .weather-temp {
+      font-size: 1.55rem;
+      font-weight: 700;
+      color: var(--yellow);
+      line-height: 1;
+    }
+
+    .weather-desc { font-size: 0.82rem; color: var(--fg2); margin-top: 2px; }
+    .weather-meta { font-size: 0.76rem; color: var(--fg4); margin-top: 1px; }
+
+    .weather-location {
+      font-size: 0.76rem;
+      color: var(--fg4);
+      margin-left: auto;
+      align-self: flex-start;
+    }
+
+    .alert-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
+
+    .alert-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 12px;
+      font-size: 0.74rem;
+      font-weight: 600;
+    }
+
+    .alert-info   { background: rgba(131,165,152,.15); color: var(--blue);   border: 1px solid rgba(131,165,152,.25); }
+    .alert-warn   { background: rgba(250,189, 47,.15); color: var(--yellow); border: 1px solid rgba(250,189, 47,.25); }
+    .alert-danger { background: rgba(251, 73, 52,.15); color: var(--red);    border: 1px solid rgba(251, 73, 52,.25); }
+
+    /* ── Time / Stats widget ─────────────────────────── */
+    .stats-line {
+      font-size: 0.86rem;
+      color: var(--fg3);
+      line-height: 1.95;
+      text-align: center;
+      overflow-wrap: break-word;
+    }
+
+    .stats-line b { color: var(--fg); font-weight: 600; }
+    .stats-line.muted { color: var(--fg4); }
+
+    .total-time-block {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--bg1);
+      text-align: center;
+    }
+
+    .total-time-number {
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: var(--yellow);
+      line-height: 1;
+    }
+
+    .total-time-label {
+      font-size: 0.72rem;
+      color: var(--fg4);
+      margin-top: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    /* ── Heatmap widget ──────────────────────────────── */
+    .heatmap-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .year-nav {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #year-label {
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--fg3);
+      min-width: 34px;
+      text-align: center;
+    }
+
+    .heatmap-wrap {
+      display: flex;
+      gap: 7px;
+      align-items: flex-start;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      -webkit-overflow-scrolling: touch;
+      /* Must have a definite width for overflow-x: auto to create a scroll container */
+      width: 100%;
+    }
+
+    .hm-dow {
+      display: grid;
+      grid-template-rows: repeat(7, 12px);
+      gap: 2px;
+      padding-top: 17px;
+      flex-shrink: 0;
+    }
+
+    .hm-dow span {
+      font-size: 0.6rem;
+      color: var(--bg4);
+      line-height: 12px;
+      text-align: right;
+    }
+
+    .hm-calendar {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .hm-months {
+      display: grid;
+      grid-template-columns: repeat(53, 12px);
+      gap: 2px;
+      height: 15px;
+      margin-bottom: 2px;
+    }
+
+    .hm-month-label {
+      font-size: 0.6rem;
+      color: var(--bg4);
+      white-space: nowrap;
+      overflow: visible;
+    }
+
+    #heatmap-grid {
+      display: grid;
+      grid-template-rows: repeat(7, 12px);
+      grid-template-columns: repeat(53, 12px);
+      gap: 2px;
+    }
+
+    /* Zero reviews: visible grey */
+    .hm-cell {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      background: var(--bg2);   /* #504945 — warm grey, clearly visible */
+    }
+
+    /* Review intensity: gruvbox blue → aqua */
+    .hm-cell[data-level="1"] { background: #1c3a48; }
+    .hm-cell[data-level="2"] { background: #2d5f72; }
+    .hm-cell[data-level="3"] { background: var(--blue-d);  } /* #458588 */
+    .hm-cell[data-level="4"] { background: #5d9488; }
+    .hm-cell[data-level="5"] { background: var(--blue);    } /* #83a598 */
+
+    #hm-tooltip {
+      position: fixed;
+      background: var(--bg-hard);
+      border: 1px solid var(--bg2);
+      border-radius: 5px;
+      padding: 5px 9px;
+      font-size: 0.74rem;
+      color: var(--fg);
+      pointer-events: none;
+      display: none;
+      z-index: 100;
+      white-space: nowrap;
+    }
+
+    /* ── Loading / error ─────────────────────────────── */
+    .placeholder { font-size: 0.8rem; color: var(--fg4); text-align: center; padding: 10px 0; }
+    .error-msg   { font-size: 0.8rem; color: var(--red); }
+
+    /* ── Mobile responsive ───────────────────────────── */
+    @media (max-width: 600px) {
+      body { padding: 14px 12px 40px; }
+
+      .dashboard { gap: 10px; }
+
+      .widget { padding: 14px 14px; }
+
+      /* Header */
+      .dash-header h1 { font-size: 1rem; }
+      /* Enlarge touch targets */
+      .btn      { padding: 8px 14px; min-height: 36px; }
+      .btn-icon { padding: 8px 10px; min-height: 36px; }
+
+      /* Weather: stack icon+main on its own row, location below */
+      .weather-body    { gap: 12px; }
+      .weather-icon    { font-size: 1.6rem; }
+      .weather-temp    { font-size: 1.3rem; }
+      .weather-location {
+        width: 100%;
+        margin-left: 0;
+        margin-top: 2px;
+      }
+
+      /* Stats: left-align so long lines wrap naturally instead of orphaning words */
+      .stats-line      { font-size: 0.8rem; text-align: left; line-height: 1.85; }
+
+      .total-time-number { font-size: 1.8rem; }
+
+      /* Heatmap: smaller cells so the full year needs less scrolling */
+      #heatmap-grid {
+        grid-template-rows:    repeat(7, 10px);
+        grid-template-columns: repeat(53, 10px);
+      }
+      .hm-months   { grid-template-columns: repeat(53, 10px); height: 13px; }
+      .hm-cell     { width: 10px; height: 10px; }
+      .hm-dow      { grid-template-rows: repeat(7, 10px); padding-top: 15px; }
+      .hm-dow span { line-height: 10px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="hm-tooltip"></div>
+
+<div class="dashboard">
+
+  <!-- Header -->
+  <div class="dash-header">
+    <h1>Dashboard</h1>
+    <div class="header-actions">
+      <span id="sync-status"></span>
+      <div class="settings-wrap">
+        <button class="btn-icon" id="settings-btn" title="Settings">⚙</button>
+        <div id="settings-panel">
+          <label class="settings-label">API Key (for /sync)</label>
+          <input id="api-key-input" type="password" placeholder="REFRESH_API_KEY value" />
+        </div>
+      </div>
+      <button class="btn" id="sync-btn">Sync ↺</button>
+    </div>
+  </div>
+
+  <!-- 1. Weather (top) -->
+  <div class="widget" id="weather-widget">
+    <div class="widget-title">Weather</div>
+    <div id="weather-content"><p class="placeholder">Loading…</p></div>
+  </div>
+
+  <!-- 2. Time / Stats (center) -->
+  <div class="widget" id="stats-widget">
+    <div class="widget-title">Today</div>
+    <div id="stats-content"><p class="placeholder">Loading…</p></div>
+    <div class="total-time-block" id="total-time-block" style="display:none">
+      <div class="total-time-number" id="total-time-number">—</div>
+      <div class="total-time-label">hours studied all time</div>
+    </div>
+  </div>
+
+  <!-- 3. Heatmap (bottom) -->
+  <div class="widget" id="heatmap-widget">
+    <div class="heatmap-header">
+      <span class="widget-title">Reviews</span>
+      <div class="year-nav">
+        <button class="btn-icon" id="year-prev">◄</button>
+        <span id="year-label">—</span>
+        <button class="btn-icon" id="year-next">►</button>
+      </div>
+    </div>
+    <div class="heatmap-wrap">
+      <div class="hm-dow">
+        <span>M</span><span></span><span>W</span><span></span><span>F</span><span></span><span>S</span>
+      </div>
+      <div class="hm-calendar">
+        <div class="hm-months" id="hm-months"></div>
+        <div id="heatmap-grid"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+
+// ── Shared state ─────────────────────────────────────────────────────
+const state = {
+  deck: 'Mandarin HSK 1000-5000',
+  year: new Date().getFullYear(),
+};
+
+// ── Utility ──────────────────────────────────────────────────────────
+function countToLevel(n) {
+  if (n <= 0)  return 0;
+  if (n <= 2)  return 1;
+  if (n <= 5)  return 2;
+  if (n <= 10) return 3;
+  if (n <= 20) return 4;
+  return 5;
+}
+
+function apiKey() { return localStorage.getItem('anki_api_key') || ''; }
+
+async function apiFetch(url) {
+  const res = await fetch(url);
+  return res.json();
+}
+
+// ── Heatmap ───────────────────────────────────────────────────────────
+function buildHeatmap(heatmap, year) {
+  const grid = document.getElementById('heatmap-grid');
+  const mRow = document.getElementById('hm-months');
+  grid.innerHTML = '';
+  mRow.innerHTML = '';
+
+  const jan1     = new Date(year, 0, 1);
+  const startDow = (jan1.getDay() + 6) % 7; // Mon=0…Sun=6
+
+  for (let col = 0; col < 53; col++) {
+    for (let row = 0; row < 7; row++) {
+      const offset = col * 7 + row - startDow;
+      const cell   = document.createElement('div');
+      cell.className = 'hm-cell';
+      cell.style.gridColumn = col + 1;
+      cell.style.gridRow    = row + 1;
+
+      if (offset >= 0) {
+        const d = new Date(year, 0, 1 + offset);
+        if (d.getFullYear() === year) {
+          const iso   = d.toISOString().slice(0, 10);
+          const count = heatmap[iso] || 0;
+          if (count > 0) cell.dataset.level = countToLevel(count);
+          cell.dataset.date  = iso;
+          cell.dataset.count = count;
+        }
+      }
+      grid.appendChild(cell);
+    }
+  }
+
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const placed  = new Set();
+  for (let m = 0; m < 12; m++) {
+    const first  = new Date(year, m, 1);
+    const dayNum = Math.round((first - jan1) / 86_400_000);
+    const col    = Math.floor((dayNum + startDow) / 7);
+    if (placed.has(col)) continue;
+    placed.add(col);
+    const span = document.createElement('span');
+    span.className = 'hm-month-label';
+    span.textContent = months[m];
+    span.style.gridColumn = col + 1;
+    mRow.appendChild(span);
+  }
+}
+
+// Tooltip
+const tooltip = document.getElementById('hm-tooltip');
+document.getElementById('heatmap-grid').addEventListener('mouseover', e => {
+  const cell = e.target.closest('.hm-cell');
+  if (!cell || !cell.dataset.date) return;
+  const count = cell.dataset.count || '0';
+  tooltip.textContent = `${cell.dataset.date}  —  ${count} review${count == 1 ? '' : 's'}`;
+  tooltip.style.display = 'block';
+});
+document.getElementById('heatmap-grid').addEventListener('mouseout', e => {
+  if (!e.relatedTarget || !e.relatedTarget.closest('#heatmap-grid')) {
+    tooltip.style.display = 'none';
+  }
+});
+document.addEventListener('mousemove', e => {
+  if (tooltip.style.display === 'none') return;
+  tooltip.style.left = (e.clientX + 14) + 'px';
+  tooltip.style.top  = (e.clientY - 28) + 'px';
+});
+
+// ── Today widget — independent of year navigation ─────────────────────
+const TodayWidget = {
+  async init() { await this.refresh(); },
+
+  async refresh() {
+    const el   = document.getElementById('stats-content');
+    const data = await apiFetch(`/api/today?deck=${encodeURIComponent(state.deck)}`);
+
+    if (data.error) {
+      el.innerHTML = `<p class="error-msg">${data.error}</p>`;
+      return;
+    }
+    if (data.total_cards === 0) {
+      el.innerHTML = '<p class="stats-line muted">No cards studied today.</p>';
+      return;
+    }
+    el.innerHTML = `
+      <p class="stats-line">Studied <b>${data.total_cards}</b> cards in <b>${data.total_time_min}</b> min today (<b>${data.s_per_card}</b>s/card)</p>
+      <p class="stats-line">Again count: <b>${data.again_count}</b> (${data.again_pct}%)</p>
+      <p class="stats-line">Learn: <b>${data.learn}</b>, Review: <b>${data.review}</b>, Relearn: <b>${data.relearn}</b>, Filtered: <b>${data.filtered}</b></p>
+      <p class="stats-line">Correct answers on mature cards: <b>${data.mature_correct}/${data.mature_total}</b> (${data.mature_pct}%)</p>
+    `;
+  },
+};
+
+function renderTotalTime(hours) {
+  document.getElementById('total-time-number').textContent = hours;
+  document.getElementById('total-time-block').style.display = '';
+}
+
+// ── Heatmap widget — only year navigation, never touches stats ─────────
+const AnkiWidget = {
+  async init() {
+    document.getElementById('year-label').textContent = state.year;
+    await Promise.all([this.refresh(), this._loadTotalTime()]);
+  },
+
+  async refresh() {
+    const data = await apiFetch(`/api/stats?deck=${encodeURIComponent(state.deck)}&year=${state.year}`);
+    buildHeatmap(data.error ? {} : data.heatmap, state.year);
+  },
+
+  async _loadTotalTime() {
+    const data = await apiFetch(`/api/total-time?deck=${encodeURIComponent(state.deck)}`);
+    if (!data.error) renderTotalTime(data.total_hours);
+  },
+};
+
+document.getElementById('year-prev').addEventListener('click', () => {
+  state.year--;
+  document.getElementById('year-label').textContent = state.year;
+  AnkiWidget.refresh();
+});
+document.getElementById('year-next').addEventListener('click', () => {
+  state.year++;
+  document.getElementById('year-label').textContent = state.year;
+  AnkiWidget.refresh();
+});
+
+// ── Weather alerts ────────────────────────────────────────────────────
+function getAlerts(d) {
+  const alerts = [];
+  const tempF   = parseInt(d.temp_f);
+  const feelsF  = parseInt(d.feels_like_f);
+  const precip  = parseFloat(d.precip_mm  || 0);
+  const maxPrecip = parseFloat(d.hourly_max_precip || 0);
+  const wind    = parseInt(d.windspeed_kmph || 0);
+  const uv      = parseInt(d.uv_index || 0);
+  const desc    = (d.desc || '').toLowerCase();
+  const hasRain = /rain|drizzle|shower|thunder|sleet/.test(desc);
+
+  if (precip > 0.5 || maxPrecip > 1 || hasRain)
+    alerts.push({ icon: '☂️', text: 'Bring an umbrella', level: 'warn' });
+
+  if (feelsF >= 104)
+    alerts.push({ icon: '🔥', text: 'Extreme heat — limit time outside', level: 'danger' });
+  else if (feelsF >= 95)
+    alerts.push({ icon: '🌡️', text: 'Heat wave — stay hydrated', level: 'warn' });
+  else if (tempF >= 88)
+    alerts.push({ icon: '😓', text: 'Hot and humid', level: 'info' });
+
+  if (tempF <= 50)
+    alerts.push({ icon: '🧥', text: 'Bring a jacket', level: 'info' });
+
+  if (wind >= 60)
+    alerts.push({ icon: '💨', text: `Strong winds (${d.windspeed_kmph} km/h)`, level: 'warn' });
+  else if (wind >= 40)
+    alerts.push({ icon: '🌬️', text: 'Breezy', level: 'info' });
+
+  if (uv >= 11)
+    alerts.push({ icon: '🕶️', text: 'Extreme UV — wear sunscreen', level: 'danger' });
+  else if (uv >= 8)
+    alerts.push({ icon: '🕶️', text: 'High UV — wear sunscreen', level: 'warn' });
+
+  return alerts;
+}
+
+// ── Weather widget ────────────────────────────────────────────────────
+const WEATHER_ICONS = {
+  'Sunny': '☀️', 'Clear': '✨', 'Partly cloudy': '⛅', 'Cloudy': '☁️',
+  'Overcast': '☁️', 'Mist': '🌫️', 'Fog': '🌫️', 'Light rain': '🌦️',
+  'Moderate rain': '🌧️', 'Heavy rain': '🌧️', 'Thundery outbreaks possible': '⛈️',
+  'Blizzard': '🌨️', 'Light snow': '🌨️', 'Moderate snow': '❄️', 'Heavy snow': '❄️',
+  'Patchy rain possible': '🌦️', 'Patchy snow possible': '🌨️',
+  'Light drizzle': '🌦️', 'Freezing drizzle': '🌧️', 'Heavy drizzle': '🌧️',
+  'Light sleet': '🌨️', 'Moderate or heavy sleet': '🌨️',
+  'Thundery heavy rain': '⛈️', 'Light rain shower': '🌦️',
+};
+
+const WeatherWidget = {
+  async init() { await this.refresh(); },
+
+  async refresh() {
+    const el   = document.getElementById('weather-content');
+    const data = await apiFetch('/api/weather');
+
+    if (data.error) {
+      el.innerHTML = `<p class="error-msg">${data.error}</p>`;
+      return;
+    }
+
+    const icon   = WEATHER_ICONS[data.desc] || '🌡️';
+    const alerts = getAlerts(data);
+    const alertHtml = alerts.length
+      ? `<div class="alert-row">${alerts.map(a =>
+          `<span class="alert-chip alert-${a.level}">${a.icon} ${a.text}</span>`
+        ).join('')}</div>`
+      : '';
+
+    el.innerHTML = `
+      <div class="weather-body">
+        <div class="weather-icon">${icon}</div>
+        <div class="weather-main">
+          <div class="weather-temp">${data.temp_f}°F <span style="font-size:1rem;color:var(--fg3)">${data.temp_c}°C</span></div>
+          <div class="weather-desc">${data.desc}</div>
+          <div class="weather-meta">Feels like ${data.feels_like_f}°F · Humidity ${data.humidity}% · UV ${data.uv_index}</div>
+        </div>
+        <div class="weather-location">${data.location}</div>
+      </div>
+      ${alertHtml}
+    `;
+  },
+};
+
+// ── Sync button ───────────────────────────────────────────────────────
+document.getElementById('sync-btn').addEventListener('click', async () => {
+  const btn    = document.getElementById('sync-btn');
+  const status = document.getElementById('sync-status');
+  btn.disabled    = true;
+  btn.textContent = 'Syncing…';
+  status.textContent = '';
+  status.className   = '';
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const key = apiKey();
+    if (key) headers['X-API-Key'] = key;
+    const res  = await fetch('/sync', { method: 'POST', headers });
+    const data = await res.json();
+    if (res.ok) {
+      status.textContent = '✓ Synced';
+      status.className   = 'ok';
+    } else {
+      status.textContent = `✗ ${data.error || 'Error'}`;
+      status.className   = 'err';
+    }
+  } catch (e) {
+    status.textContent = `✗ ${e.message}`;
+    status.className   = 'err';
+  }
+
+  btn.disabled    = false;
+  btn.textContent = 'Sync ↺';
+  setTimeout(() => { status.textContent = ''; status.className = ''; }, 4000);
+});
+
+// ── Settings panel ────────────────────────────────────────────────────
+const settingsBtn   = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+const apiKeyInput   = document.getElementById('api-key-input');
+apiKeyInput.value = apiKey();
+
+settingsBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  settingsPanel.classList.toggle('open');
+});
+apiKeyInput.addEventListener('input', () => {
+  localStorage.setItem('anki_api_key', apiKeyInput.value);
+});
+document.addEventListener('click', e => {
+  if (!settingsPanel.contains(e.target) && e.target !== settingsBtn)
+    settingsPanel.classList.remove('open');
+});
+
+// ── Widget registry ───────────────────────────────────────────────────
+// Add new widgets here: { init(), refresh() }
+const WIDGETS = [WeatherWidget, TodayWidget, AnkiWidget];
+
+Promise.all(WIDGETS.map(w => w.init()));
+</script>
+</body>
+</html>
