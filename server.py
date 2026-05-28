@@ -17,7 +17,9 @@ Endpoints:
 import functools
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -30,7 +32,9 @@ app = Flask(__name__)
 ANKI_CONNECT_URL = "http://localhost:8765"
 API_KEY = os.environ.get("REFRESH_API_KEY", "")
 WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Taipei")
-OVERCAST_DB = os.environ.get("OVERCAST_DB", "overcast.db")
+OVERCAST_DB   = os.environ.get("OVERCAST_DB",   "overcast.db")
+OVERCAST_AUTH = os.environ.get("OVERCAST_AUTH", "auth.json")
+OVERCAST_CLI  = os.environ.get("OVERCAST_CLI",  "overcast-to-sqlite")
 
 CHINESE_PODCASTS = [
     "Dashu Mandarin Podcast",
@@ -393,6 +397,21 @@ def api_podcasts():
         "total_hours": round(total_seconds / 3600, 1),
         "heatmap":     heatmap,
     })
+
+
+@app.route("/api/podcasts/sync", methods=["POST"])
+@require_api_key
+def podcast_sync():
+    binary = shutil.which(OVERCAST_CLI) or OVERCAST_CLI
+    result = subprocess.run(
+        [binary, "save", OVERCAST_DB, "-a", OVERCAST_AUTH],
+        capture_output=True, text=True, timeout=120,
+    )
+    return jsonify({
+        "ok":     result.returncode == 0,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }), (200 if result.returncode == 0 else 500)
 
 
 if __name__ == "__main__":
