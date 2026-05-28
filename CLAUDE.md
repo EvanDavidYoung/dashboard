@@ -11,8 +11,11 @@ REFRESH_API_KEY=mysecret WEATHER_LOCATION="Taipei" uv run python server.py
 The server listens on port 5555 by default; override with `PORT=<n>`. AnkiConnect must be running inside Anki on the same machine (port 8765).
 
 Env vars:
-- `REFRESH_API_KEY` — protects `/sync`; if unset, the endpoint is unprotected
+- `REFRESH_API_KEY` — protects `/sync` and `/api/podcasts/sync`; if unset, both endpoints are unprotected
 - `WEATHER_LOCATION` — city name passed to wttr.in (default: `Taipei`)
+- `OVERCAST_DB` — path to overcast-to-sqlite database (default: `overcast.db`)
+- `OVERCAST_AUTH` — path to overcast-to-sqlite auth cookie file (default: `auth.json`)
+- `OVERCAST_CLI` — overcast-to-sqlite binary name/path (default: `overcast-to-sqlite`)
 - `PORT` — server port (default: `5555`)
 
 ## Architecture
@@ -30,6 +33,7 @@ Env vars:
 | `GET /api/total-time?deck=X` | All-time total hours (fetches all reviews with `startID=0`) |
 | `GET /api/weather` | Proxies `wttr.in/{WEATHER_LOCATION}?format=j1`; no external API key needed |
 | `GET /api/podcasts?year=Y` | Per-show totals (all-time) + daily listening heatmap for the year |
+| `POST /api/podcasts/sync` | Shells out to `overcast-to-sqlite save`; pulls fresh data from Overcast; `require_api_key` |
 
 All AnkiConnect calls go through `anki_request(action, **params)`, which POSTs to `http://localhost:8765` using the AnkiConnect v6 JSON protocol. Responses are flat lists: `[reviewTime_ms, cardId, usn, ease, ivl, lastIvl, factor, time_ms, type]` — key indices are `[0]` ts, `[3]` ease, `[5]` lastIvl, `[7]` time_ms, `[8]` type.
 
@@ -51,11 +55,13 @@ Self-contained SPA — vanilla JS, no framework, Gruvbox dark color scheme via C
 - `WeatherWidget` — fetches `/api/weather`, renders conditions + contextual alert chips
 - `TodayWidget` — fetches `/api/today`, renders session stats; never re-fetches on year changes
 - `ChineseTotalWidget` — fetches `/api/total-time` + `/api/podcasts` in parallel; shows combined hours with Anki/listening breakdown
-- `PodcastWidget` — fetches `/api/podcasts?year=Y`; renders daily listening heatmap (orange/yellow) + per-show bar chart; year nav + refresh button in header
+- `PodcastWidget` — fetches `/api/podcasts?year=Y`; renders daily listening heatmap (orange/yellow) + per-show bar chart; year nav + ↺ button in header. The ↺ button calls `syncAndRefresh()`: hits `POST /api/podcasts/sync` first, then refreshes both `PodcastWidget` and `ChineseTotalWidget` in parallel.
 - `AnkiWidget` — fetches `/api/stats` for heatmap + `/api/total-time`; year nav only re-calls `refresh()` which updates the heatmap only
 
 **Heatmap**: Both the Anki and podcast heatmaps share `buildHeatmapGrid(gridEl, monthsEl, year, data, levelFn, cellClass, tooltipFmt)`. CSS class `.hm-grid` sets the 53×7 grid layout. `.hm-cell` uses a blue scale; `.phm-cell` uses an orange/yellow scale (thresholds: 0.5/1/1.5/2h). `startDow = (jan1.getDay() + 6) % 7` aligns Jan 1 to the correct day-of-week.
 
 **Mobile**: `min-width: 0` on `.widget` prevents grid items from overflowing the viewport. `width: 100%` on `.heatmap-wrap` gives `overflow-x: auto` a definite width to scroll within. Breakpoint at 600px.
+
+**Sync button** (header): fires Anki sync (`POST /sync`) and Overcast sync (`POST /api/podcasts/sync`) in parallel via `Promise.allSettled`. Each updates its own widgets on completion without blocking the other. The button re-enables and shows ✓/✗ once both settle.
 
 `main.py` is an unused scaffold from `uv init`.
