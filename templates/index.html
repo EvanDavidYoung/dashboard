@@ -376,6 +376,14 @@
     }
 
     /* ── Podcast widget ──────────────────────────────── */
+    .podcast-page-nav {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+      margin-top: 8px;
+    }
+
     .podcast-total {
       font-size: 0.82rem;
       color: var(--fg4);
@@ -485,10 +493,10 @@
     </div>
   </div>
 
-  <!-- 1. Weather -->
-  <div class="widget" id="weather-widget">
-    <div class="widget-title">Weather</div>
-    <div id="weather-content"><p class="placeholder">Loading…</p></div>
+  <!-- 1. Total Chinese Time -->
+  <div class="widget" id="chinese-total-widget">
+    <div class="widget-title">Total Chinese Time</div>
+    <div id="chinese-total-content"><p class="placeholder">Loading…</p></div>
   </div>
 
   <!-- 2. Today / Stats -->
@@ -501,10 +509,25 @@
     </div>
   </div>
 
-  <!-- 3. Total Chinese Time -->
-  <div class="widget" id="chinese-total-widget">
-    <div class="widget-title">Total Chinese Time</div>
-    <div id="chinese-total-content"><p class="placeholder">Loading…</p></div>
+  <!-- 3. Anki Reviews Heatmap -->
+  <div class="widget" id="heatmap-widget">
+    <div class="heatmap-header">
+      <span class="widget-title">Reviews</span>
+      <div class="year-nav">
+        <button class="btn-icon" id="year-prev">◄</button>
+        <span id="year-label">—</span>
+        <button class="btn-icon" id="year-next">►</button>
+      </div>
+    </div>
+    <div class="heatmap-wrap">
+      <div class="hm-dow">
+        <span>M</span><span></span><span>W</span><span></span><span>F</span><span></span><span>S</span>
+      </div>
+      <div class="hm-calendar">
+        <div class="hm-months" id="hm-months"></div>
+        <div id="heatmap-grid" class="hm-grid"></div>
+      </div>
+    </div>
   </div>
 
   <!-- 4. Chinese Podcasts -->
@@ -534,25 +557,10 @@
     <div id="podcasts-content"><p class="placeholder">Loading…</p></div>
   </div>
 
-  <!-- 5. Anki Reviews Heatmap -->
-  <div class="widget" id="heatmap-widget">
-    <div class="heatmap-header">
-      <span class="widget-title">Reviews</span>
-      <div class="year-nav">
-        <button class="btn-icon" id="year-prev">◄</button>
-        <span id="year-label">—</span>
-        <button class="btn-icon" id="year-next">►</button>
-      </div>
-    </div>
-    <div class="heatmap-wrap">
-      <div class="hm-dow">
-        <span>M</span><span></span><span>W</span><span></span><span>F</span><span></span><span>S</span>
-      </div>
-      <div class="hm-calendar">
-        <div class="hm-months" id="hm-months"></div>
-        <div id="heatmap-grid" class="hm-grid"></div>
-      </div>
-    </div>
+  <!-- 5. Weather -->
+  <div class="widget" id="weather-widget">
+    <div class="widget-title">Weather</div>
+    <div id="weather-content"><p class="placeholder">Loading…</p></div>
   </div>
 
 </div>
@@ -565,6 +573,7 @@ const state = {
   deck: 'Mandarin HSK 1000-5000',
   year: new Date().getFullYear(),
   podcastYear: new Date().getFullYear(),
+  podcastPage: 0,
 };
 
 // ── Utility ──────────────────────────────────────────────────────────
@@ -870,6 +879,8 @@ document.addEventListener('click', e => {
 
 // ── Podcast widget ────────────────────────────────────────────────────
 const PodcastWidget = {
+  _feeds: [],
+
   async init() {
     document.getElementById('podcast-year-label').textContent = state.podcastYear;
     await this.refresh();
@@ -912,8 +923,21 @@ const PodcastWidget = {
       (iso, val) => `${iso}  —  ${val > 0 ? val.toFixed(1) + 'h' : 'No listening'}`
     );
 
-    const maxHours = data.feeds[0]?.hours || 1;
-    el.innerHTML = data.feeds.map(f => `
+    this._feeds = data.feeds;
+    state.podcastPage = 0;
+    this._renderFeeds();
+  },
+
+  _renderFeeds() {
+    const el      = document.getElementById('podcasts-content');
+    const perPage = 4;
+    const pages   = Math.ceil(this._feeds.length / perPage);
+    state.podcastPage = Math.min(state.podcastPage, Math.max(0, pages - 1));
+    const page  = state.podcastPage;
+    const slice = this._feeds.slice(page * perPage, (page + 1) * perPage);
+    const maxHours = this._feeds[0]?.hours || 1;
+
+    const feedsHtml = slice.map(f => `
       <div class="podcast-row">
         <span class="podcast-name" title="${f.title}">${f.title}</span>
         <span class="podcast-hours">${f.hours}h · ${f.episodes_played} ep</span>
@@ -922,16 +946,35 @@ const PodcastWidget = {
         </div>
       </div>
     `).join('');
+
+    const navHtml = pages > 1 ? `
+      <div class="podcast-page-nav">
+        <button class="btn-icon" id="podcast-page-prev" ${page === 0 ? 'disabled' : ''}>◄</button>
+        <span style="font-size:0.74rem; color:var(--fg4)">${page + 1} / ${pages}</span>
+        <button class="btn-icon" id="podcast-page-next" ${page >= pages - 1 ? 'disabled' : ''}>►</button>
+      </div>
+    ` : '';
+
+    el.innerHTML = feedsHtml + navHtml;
+
+    document.getElementById('podcast-page-prev')?.addEventListener('click', () => {
+      if (state.podcastPage > 0) { state.podcastPage--; this._renderFeeds(); }
+    });
+    document.getElementById('podcast-page-next')?.addEventListener('click', () => {
+      if (state.podcastPage < pages - 1) { state.podcastPage++; this._renderFeeds(); }
+    });
   },
 };
 
 document.getElementById('podcast-year-prev').addEventListener('click', () => {
   state.podcastYear--;
+  state.podcastPage = 0;
   document.getElementById('podcast-year-label').textContent = state.podcastYear;
   PodcastWidget.refresh();
 });
 document.getElementById('podcast-year-next').addEventListener('click', () => {
   state.podcastYear++;
+  state.podcastPage = 0;
   document.getElementById('podcast-year-label').textContent = state.podcastYear;
   PodcastWidget.refresh();
 });
