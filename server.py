@@ -419,4 +419,4 @@ if __name__ == "__main__":
     if not API_KEY:
         print("WARNING: REFRESH_API_KEY is not set — /sync endpoint is unprotected")
     print(f"Listening on http://0.0.0.0:{port}")
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=True)
