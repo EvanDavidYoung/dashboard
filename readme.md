@@ -52,7 +52,7 @@ Combined widget showing all-time Anki hours + podcast listening hours with a sin
 ### Weather
 Current conditions for the configured city via [wttr.in](https://wttr.in) (no API key required). Contextual alerts are shown for:
 - ☂️ Rain forecast (current precip or today's hourly max > 1 mm)
-- 🔥 Extreme heat (feels like ≥ 104°F) / 🌡️ Heat wave (≥ 95°F) / 😓 Hot and humid (≥ 88°F)
+- 🔥 Extreme heat (feels like ≥ 104°F) / 🌡️ Heat wave (feels like ≥ 95°F) / 😓 Hot and humid (feels like ≥ 88°F)
 - 🧥 Cold (≤ 50°F)
 - 💨 Strong winds (≥ 60 km/h) / 🌬️ Breezy (≥ 40 km/h)
 - 🕶️ Extreme UV (≥ 11) / High UV (≥ 8)

@@ -745,7 +745,7 @@ function getAlerts(d) {
     alerts.push({ icon: '🔥', text: 'Extreme heat — limit time outside', level: 'danger' });
   else if (feelsF >= 95)
     alerts.push({ icon: '🌡️', text: 'Heat wave — stay hydrated', level: 'warn' });
-  else if (tempF >= 88)
+  else if (feelsF >= 88)
     alerts.push({ icon: '😓', text: 'Hot and humid', level: 'info' });
 
   if (tempF <= 50)
