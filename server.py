@@ -414,6 +414,28 @@ def podcast_sync():
     }), (200 if result.returncode == 0 else 500)
 
 
+SLACKDUMP_GH_REPO = os.environ.get("SLACKDUMP_GH_REPO", "EvanDavidYoung/slackdump-pipeline")
+
+@app.route("/api/slackdump/backup", methods=["POST"])
+@require_api_key
+def slackdump_backup():
+    gh = shutil.which("gh")
+    if not gh:
+        return jsonify({"ok": False, "error": "gh CLI not found in PATH"}), 500
+    result = subprocess.run(
+        [gh, "workflow", "run", "daily-backup.yml", "--repo", SLACKDUMP_GH_REPO],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        return jsonify({
+            "ok": False,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }), 500
+    runs_url = f"https://github.com/{SLACKDUMP_GH_REPO}/actions"
+    return jsonify({"ok": True, "message": f"Workflow dispatched. View run at {runs_url}"})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5555))
     if not API_KEY:

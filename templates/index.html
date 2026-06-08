@@ -131,6 +131,53 @@
 
     .btn-icon:hover { color: var(--fg); }
 
+    /* ── Tabs ────────────────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--bg1);
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--fg4);
+      cursor: pointer;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 7px 16px 9px;
+      text-transform: uppercase;
+      transition: color 0.12s, border-color 0.12s;
+      margin-bottom: -1px;
+    }
+
+    .tab-btn:hover  { color: var(--fg2); }
+    .tab-btn.active { color: var(--fg); border-bottom-color: var(--blue); }
+
+    .tab-pane         { display: none; }
+    .tab-pane.active  { display: grid; gap: 12px; }
+
+    /* ── Slack Backup widget ─────────────────────────── */
+    #slackdump-output {
+      margin-top: 12px;
+      font-family: monospace;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      color: var(--fg4);
+      max-height: 260px;
+      overflow-y: auto;
+      background: var(--bg-hard);
+      border: 1px solid var(--bg1);
+      border-radius: 4px;
+      padding: 8px 10px;
+      display: none;
+    }
+
+    #slackdump-output.ok  { color: var(--green); }
+    #slackdump-output.err { color: var(--red); }
+
     /* ── Settings overlay ────────────────────────────── */
     .settings-wrap { position: relative; }
 
@@ -493,6 +540,15 @@
     </div>
   </div>
 
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="main">Main</button>
+    <button class="tab-btn" data-tab="tools">Tools</button>
+  </div>
+
+  <!-- Tab: Main -->
+  <div class="tab-pane active" id="tab-main">
+
   <!-- 1. Weather -->
   <div class="widget" id="weather-widget">
     <div class="widget-title">Weather</div>
@@ -563,6 +619,22 @@
     <div id="podcasts-content"><p class="placeholder">Loading…</p></div>
   </div>
 
+  </div><!-- end tab-main -->
+
+  <!-- Tab: Tools -->
+  <div class="tab-pane" id="tab-tools">
+
+    <!-- Slack Backup -->
+    <div class="widget" id="slackdump-widget">
+      <div class="widget-title">Slack Backup</div>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+        <button class="btn" id="slackdump-btn">Run Backup</button>
+        <span id="slackdump-status" style="font-size:0.8rem; color:var(--fg4)"></span>
+      </div>
+      <pre id="slackdump-output"></pre>
+    </div>
+
+  </div><!-- end tab-tools -->
 
 </div>
 
@@ -1017,6 +1089,61 @@ const ChineseTotalWidget = {
     `;
   },
 };
+
+// ── Tab switching ─────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Slack Backup widget ───────────────────────────────────────────────
+document.getElementById('slackdump-btn').addEventListener('click', async () => {
+  const btn    = document.getElementById('slackdump-btn');
+  const status = document.getElementById('slackdump-status');
+  const output = document.getElementById('slackdump-output');
+
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  status.textContent = '';
+  output.textContent = '';
+  output.className = '';
+  output.style.display = 'none';
+
+  try {
+    const res  = await fetch('/api/slackdump/backup', {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey() },
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      btn.textContent = 'Run Backup ✓';
+      status.innerHTML = `Dispatched — <a href="https://github.com/EvanDavidYoung/slackdump-pipeline/actions" target="_blank" style="color:var(--blue)">view run</a>`;
+      status.style.color = 'var(--green)';
+    } else {
+      btn.textContent = 'Run Backup ✗';
+      status.textContent = data.error || 'Failed';
+      status.style.color = 'var(--red)';
+    }
+
+    const text = [data.stdout, data.stderr].filter(Boolean).join('\n').trim();
+    if (text) {
+      output.textContent = text;
+      output.className = data.ok ? 'ok' : 'err';
+      output.style.display = 'block';
+    }
+  } catch (e) {
+    btn.textContent = 'Run Backup ✗';
+    status.textContent = String(e);
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ── Widget registry ───────────────────────────────────────────────────
 const WIDGETS = [WeatherWidget, TodayWidget, ChineseTotalWidget, PodcastWidget, AnkiWidget];
