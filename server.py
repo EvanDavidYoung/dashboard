@@ -15,6 +15,8 @@ Endpoints:
 """
 
 import functools
+import glob
+import json
 import os
 import re
 import shutil
@@ -22,7 +24,7 @@ import sqlite3
 import subprocess
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 from flask import Flask, jsonify, render_template, request
@@ -476,6 +478,129 @@ def obsidian_publish():
         "pr_url": pr_url,
         "output": output,
     }), (200 if ok else 500)
+
+
+# ── Claude Code usage ────────────────────────────────────────────────────────
+# Claude Code writes per-session transcripts to ~/.claude/projects/**/*.jsonl.
+# Each assistant line carries a top-level ISO `timestamp`, `message.model`, and
+# `message.usage` token counts. There is NO local record of Anthropic's real
+# rate-limit window or token cap, so the "current window" is reconstructed from
+# message timestamps (first activity → +WINDOW, resets after a >=WINDOW gap) and
+# the limit is a user-tunable estimate calibrated against Claude Code's /status.
+CLAUDE_PROJECTS_DIR = os.environ.get(
+    "CLAUDE_PROJECTS_DIR", os.path.expanduser("~/.claude/projects")
+)
+CLAUDE_WINDOW_HOURS = float(os.environ.get("CLAUDE_WINDOW_HOURS", "5"))
+# Approximate per-window token budget; 0 = unknown → frontend hides the bar.
+CLAUDE_WINDOW_TOKEN_LIMIT = int(os.environ.get("CLAUDE_WINDOW_TOKEN_LIMIT", "20000000"))
+
+
+def _parse_ts(value):
+    """Parse an ISO-8601 timestamp (with trailing Z) to an aware UTC datetime."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _collect_claude_events(window):
+    """Return (ts, model, usage) tuples for assistant lines written within the
+    last `window` (+1h margin). Files are pre-filtered by mtime so we only read
+    transcripts that could contain in-window activity."""
+    cutoff = datetime.now(timezone.utc) - (window + timedelta(hours=1))
+    events = []
+    pattern = os.path.join(CLAUDE_PROJECTS_DIR, "**", "*.jsonl")
+    for path in glob.glob(pattern, recursive=True):
+        try:
+            if datetime.fromtimestamp(os.path.getmtime(path), timezone.utc) < cutoff:
+                continue
+            with open(path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or '"usage"' not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if rec.get("type") != "assistant":
+                        continue
+                    msg = rec.get("message") or {}
+                    usage = msg.get("usage")
+                    ts = _parse_ts(rec.get("timestamp"))
+                    if not usage or ts is None:
+                        continue
+                    events.append((ts, msg.get("model") or "unknown", usage))
+        except (OSError, UnicodeDecodeError):
+            continue
+    events.sort(key=lambda e: e[0])
+    return events
+
+
+@app.route("/api/usage/claude-code")
+def claude_code_usage():
+    window = timedelta(hours=CLAUDE_WINDOW_HOURS)
+    try:
+        events = _collect_claude_events(window)
+    except Exception as e:  # never let a bad transcript 500 the dashboard
+        return jsonify({"error": str(e)}), 500
+
+    now = datetime.now(timezone.utc)
+    empty = {
+        "active": False,
+        "window_start": None,
+        "reset_at": None,
+        "seconds_to_reset": 0,
+        "total_tokens": 0,
+        "breakdown": {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0},
+        "by_model": {},
+        "limit": CLAUDE_WINDOW_TOKEN_LIMIT,
+    }
+    if not events:
+        return jsonify(empty)
+
+    # Reconstruct the active window: walk forward, resetting the window start
+    # whenever an event lands beyond the prior window's reset point.
+    window_start = events[0][0]
+    for ts, _model, _usage in events:
+        if ts >= window_start + window:
+            window_start = ts
+    reset_at = window_start + window
+    if now >= reset_at:  # the last window has elapsed → no active window
+        return jsonify(empty)
+
+    breakdown = {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0}
+    by_model = {}
+    for ts, model, usage in events:
+        if not (window_start <= ts < reset_at):
+            continue
+        parts = {
+            "input": int(usage.get("input_tokens", 0) or 0),
+            "output": int(usage.get("output_tokens", 0) or 0),
+            "cache_read": int(usage.get("cache_read_input_tokens", 0) or 0),
+            "cache_creation": int(usage.get("cache_creation_input_tokens", 0) or 0),
+        }
+        m = by_model.setdefault(
+            model, {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0, "total": 0}
+        )
+        for k, v in parts.items():
+            breakdown[k] += v
+            m[k] += v
+            m["total"] += v
+
+    total = sum(breakdown.values())
+    return jsonify({
+        "active": True,
+        "window_start": window_start.isoformat().replace("+00:00", "Z"),
+        "reset_at": reset_at.isoformat().replace("+00:00", "Z"),
+        "seconds_to_reset": int((reset_at - now).total_seconds()),
+        "total_tokens": total,
+        "breakdown": breakdown,
+        "by_model": by_model,
+        "limit": CLAUDE_WINDOW_TOKEN_LIMIT,
+    })
 
 
 if __name__ == "__main__":

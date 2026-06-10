@@ -181,6 +181,36 @@
     #slackdump-output.err,
     #obsidian-output.err { color: var(--red); }
 
+    /* ── Usage tab (Claude Code window) ──────────────── */
+    .usage-total  { font-size: 1.9rem; font-weight: 700; color: var(--fg); }
+    .usage-sub    { font-size: 0.78rem; color: var(--fg4); margin-top: 2px; }
+    .usage-bar    {
+      margin-top: 14px;
+      height: 10px;
+      background: var(--bg1);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .usage-bar-fill {
+      height: 100%;
+      background: var(--blue);
+      border-radius: 5px;
+      transition: width 0.3s;
+    }
+    .usage-bar-fill.warn { background: var(--orange); }
+    .usage-bar-fill.crit { background: var(--red); }
+    .usage-reset  { font-size: 0.8rem; color: var(--fg3); margin-top: 8px; }
+    .usage-chips  { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+    .usage-chip   {
+      font-size: 0.72rem;
+      color: var(--fg2);
+      background: var(--bg1);
+      border: 1px solid var(--bg2);
+      border-radius: 4px;
+      padding: 3px 8px;
+    }
+    .usage-chip b { color: var(--fg); font-weight: 600; }
+
     /* ── Settings overlay ────────────────────────────── */
     .settings-wrap { position: relative; }
 
@@ -547,6 +577,7 @@
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="main">Main</button>
     <button class="tab-btn" data-tab="tools">Tools</button>
+    <button class="tab-btn" data-tab="usage">Usage</button>
   </div>
 
   <!-- Tab: Main -->
@@ -648,6 +679,26 @@
     </div>
 
   </div><!-- end tab-tools -->
+
+  <!-- Tab: Usage -->
+  <div class="tab-pane" id="tab-usage">
+
+    <!-- Claude Code current window -->
+    <div class="widget" id="cc-usage-widget">
+      <div class="widget-title">Claude Code — Current Window</div>
+      <div id="cc-usage-content"><p class="placeholder">Loading…</p></div>
+    </div>
+
+    <!-- Modal monthly credits -->
+    <div class="widget" id="modal-usage-widget">
+      <div class="widget-title">Modal — Monthly Credits</div>
+      <p style="font-size:0.85rem; color:var(--fg2); margin-bottom:12px">
+        Modal exposes no API for remaining credits — open the dashboard to check usage:
+      </p>
+      <a class="btn" href="https://modal.com/settings/usage" target="_blank">Open Modal usage ↗</a>
+    </div>
+
+  </div><!-- end tab-usage -->
 
 </div>
 
@@ -1208,8 +1259,74 @@ document.getElementById('obsidian-btn').addEventListener('click', async () => {
   }
 });
 
+// ── Claude Code usage widget ──────────────────────────────────────────
+function fmtTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(n);
+}
+
+function fmtCountdown(secs) {
+  if (secs <= 0) return 'now';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+const ClaudeCodeWidget = {
+  async init() { await this.refresh(); },
+
+  async refresh() {
+    const el = document.getElementById('cc-usage-content');
+    const data = await apiFetch('/api/usage/claude-code');
+
+    if (data.error) {
+      el.innerHTML = `<p class="error-msg">${data.error}</p>`;
+      return;
+    }
+    if (!data.active) {
+      el.innerHTML = `
+        <div class="usage-total">${fmtTokens(0)}</div>
+        <div class="usage-sub">no active window — usage has reset</div>`;
+      return;
+    }
+
+    // Optional progress bar — only when a limit is configured.
+    let barHtml = '';
+    if (data.limit > 0) {
+      const pct  = Math.min(100, (data.total_tokens / data.limit) * 100);
+      const cls  = pct >= 90 ? 'crit' : pct >= 75 ? 'warn' : '';
+      barHtml = `
+        <div class="usage-bar"><div class="usage-bar-fill ${cls}" style="width:${pct}%"></div></div>
+        <div class="usage-sub">${pct.toFixed(1)}% of ${fmtTokens(data.limit)} window limit (est.)</div>`;
+    } else {
+      barHtml = `<div class="usage-sub">set <code>CLAUDE_WINDOW_TOKEN_LIMIT</code> to show a progress bar</div>`;
+    }
+
+    const b = data.breakdown;
+    const catChips = [
+      ['input', b.input], ['output', b.output],
+      ['cache read', b.cache_read], ['cache write', b.cache_creation],
+    ].map(([label, v]) => `<span class="usage-chip">${label} <b>${fmtTokens(v)}</b></span>`).join('');
+
+    const modelChips = Object.entries(data.by_model)
+      .sort((a, c) => c[1].total - a[1].total)
+      .map(([model, m]) => `<span class="usage-chip">${model} <b>${fmtTokens(m.total)}</b></span>`)
+      .join('');
+
+    el.innerHTML = `
+      <div class="usage-total">${fmtTokens(data.total_tokens)}</div>
+      <div class="usage-sub">tokens this window</div>
+      ${barHtml}
+      <div class="usage-reset">↻ resets in ${fmtCountdown(data.seconds_to_reset)}</div>
+      <div class="usage-chips">${catChips}</div>
+      <div class="usage-chips">${modelChips}</div>`;
+  },
+};
+
 // ── Widget registry ───────────────────────────────────────────────────
-const WIDGETS = [WeatherWidget, TodayWidget, ChineseTotalWidget, PodcastWidget, AnkiWidget];
+const WIDGETS = [WeatherWidget, TodayWidget, ChineseTotalWidget, PodcastWidget, AnkiWidget, ClaudeCodeWidget];
 
 Promise.all(WIDGETS.map(w => w.init()));
 </script>
