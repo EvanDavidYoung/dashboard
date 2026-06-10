@@ -436,6 +436,48 @@ def slackdump_backup():
     return jsonify({"ok": True, "message": f"Workflow dispatched. View run at {runs_url}"})
 
 
+OBSIDIAN_PUBLISH_DIR = os.environ.get(
+    "OBSIDIAN_PUBLISH_DIR", "/Users/evanyoung/Desktop/projects/ObsidianPublishScript"
+)
+
+@app.route("/api/obsidian/publish", methods=["POST"])
+@require_api_key
+def obsidian_publish():
+    uv = shutil.which("uv")
+    if not uv:
+        return jsonify({"ok": False, "error": "uv not found in PATH"}), 500
+    if not os.path.isdir(OBSIDIAN_PUBLISH_DIR):
+        return jsonify({"ok": False, "error": f"Script dir not found: {OBSIDIAN_PUBLISH_DIR}"}), 500
+    try:
+        result = subprocess.run(
+            [uv, "run", "obsidian_publish_script.py"],
+            cwd=OBSIDIAN_PUBLISH_DIR,
+            capture_output=True, text=True, timeout=600,
+        )
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "error": "Publish script timed out after 600s"}), 500
+
+    # The script logs to stderr; surface the PR URL (new, existing, or commented-on).
+    output = "\n".join(filter(None, [result.stdout, result.stderr])).strip()
+    ok = result.returncode == 0
+    pr_match = re.search(r"https://github\.com/\S+/pull/\d+", output)
+    pr_url = pr_match.group(0) if pr_match else None
+    if not ok:
+        message = "Publish failed."
+    elif "Created new pull request" in output:
+        message = f"Pull request created: {pr_url}"
+    elif pr_url:
+        message = f"Publish completed — existing PR: {pr_url}"
+    else:
+        message = "Publish completed (no open PR)."
+    return jsonify({
+        "ok": ok,
+        "message": message,
+        "pr_url": pr_url,
+        "output": output,
+    }), (200 if ok else 500)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5555))
     if not API_KEY:

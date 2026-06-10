@@ -159,8 +159,9 @@
     .tab-pane         { display: none; }
     .tab-pane.active  { display: grid; gap: 12px; }
 
-    /* ── Slack Backup widget ─────────────────────────── */
-    #slackdump-output {
+    /* ── Slack Backup / Obsidian Publish widgets ─────── */
+    #slackdump-output,
+    #obsidian-output {
       margin-top: 12px;
       font-family: monospace;
       font-size: 0.75rem;
@@ -175,8 +176,10 @@
       display: none;
     }
 
-    #slackdump-output.ok  { color: var(--green); }
-    #slackdump-output.err { color: var(--red); }
+    #slackdump-output.ok,
+    #obsidian-output.ok  { color: var(--green); }
+    #slackdump-output.err,
+    #obsidian-output.err { color: var(--red); }
 
     /* ── Settings overlay ────────────────────────────── */
     .settings-wrap { position: relative; }
@@ -632,6 +635,16 @@
         <span id="slackdump-status" style="font-size:0.8rem; color:var(--fg4)"></span>
       </div>
       <pre id="slackdump-output"></pre>
+    </div>
+
+    <!-- Obsidian Publish -->
+    <div class="widget" id="obsidian-widget">
+      <div class="widget-title">Obsidian Publish</div>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+        <button class="btn" id="obsidian-btn">Publish Notes</button>
+        <span id="obsidian-status" style="font-size:0.8rem; color:var(--fg4)"></span>
+      </div>
+      <pre id="obsidian-output"></pre>
     </div>
 
   </div><!-- end tab-tools -->
@@ -1138,6 +1151,56 @@ document.getElementById('slackdump-btn').addEventListener('click', async () => {
     }
   } catch (e) {
     btn.textContent = 'Run Backup ✗';
+    status.textContent = String(e);
+    status.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Obsidian Publish widget ───────────────────────────────────────────
+document.getElementById('obsidian-btn').addEventListener('click', async () => {
+  const btn    = document.getElementById('obsidian-btn');
+  const status = document.getElementById('obsidian-status');
+  const output = document.getElementById('obsidian-output');
+
+  btn.disabled = true;
+  btn.textContent = 'Publishing…';
+  status.textContent = 'This can take a minute…';
+  status.style.color = 'var(--fg4)';
+  output.textContent = '';
+  output.className = '';
+  output.style.display = 'none';
+
+  try {
+    const res  = await fetch('/api/obsidian/publish', {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey() },
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      btn.textContent = 'Publish Notes ✓';
+      if (data.pr_url) {
+        status.innerHTML = `<a href="${data.pr_url}" target="_blank" style="color:var(--blue)">${data.pr_url}</a>`;
+      } else {
+        status.textContent = data.message || 'Done';
+      }
+      status.style.color = 'var(--green)';
+    } else {
+      btn.textContent = 'Publish Notes ✗';
+      status.textContent = data.error || data.message || 'Failed';
+      status.style.color = 'var(--red)';
+    }
+
+    const text = (data.output || data.error || '').trim();
+    if (text) {
+      output.textContent = text;
+      output.className = data.ok ? 'ok' : 'err';
+      output.style.display = 'block';
+    }
+  } catch (e) {
+    btn.textContent = 'Publish Notes ✗';
     status.textContent = String(e);
     status.style.color = 'var(--red)';
   } finally {
