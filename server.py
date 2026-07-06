@@ -22,18 +22,23 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import requests
-from flask import Flask, jsonify, render_template, request
+from dotenv import load_dotenv
+from flask import Flask, jsonify, render_template, request, send_from_directory
+
+load_dotenv()  # read key=value pairs from a local .env into os.environ
 
 app = Flask(__name__)
 
 ANKI_CONNECT_URL = "http://localhost:8765"
 API_KEY = os.environ.get("REFRESH_API_KEY", "")
-WEATHER_LOCATION = os.environ.get("WEATHER_LOCATION", "Taipei")
+WEATHER_LOCATIONS = {"ny": "New York", "sf": "San Francisco", "taipei": "Taipei"}
+WEATHER_DEFAULT   = os.environ.get("WEATHER_LOCATION", "New York")
 OVERCAST_DB   = os.environ.get("OVERCAST_DB",   "overcast.db")
 OVERCAST_AUTH = os.environ.get("OVERCAST_AUTH", "auth.json")
 OVERCAST_CLI  = os.environ.get("OVERCAST_CLI",  "overcast-to-sqlite")
@@ -83,6 +88,11 @@ def _anki_error_response(e):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/test")
+def test_page():
+    return send_from_directory("test", "clock-glyphs.html")
 
 
 @app.route("/sync", methods=["GET", "POST"])
@@ -206,7 +216,8 @@ def api_total_time():
 @app.route("/api/weather")
 def api_weather():
     try:
-        loc = requests.utils.quote(WEATHER_LOCATION, safe="")
+        city = WEATHER_LOCATIONS.get(request.args.get("loc", ""), WEATHER_DEFAULT)
+        loc = requests.utils.quote(city, safe="")
         resp = requests.get(
             f"https://wttr.in/{loc}?format=j1",
             timeout=5,
@@ -230,7 +241,7 @@ def api_weather():
             "windspeed_kmph":     current.get("windspeedKmph", "0"),
             "uv_index":           current.get("uvIndex", "0"),
             "hourly_max_precip":  round(hourly_max_precip, 1),
-            "location":           WEATHER_LOCATION,
+            "location":           city,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 502
@@ -480,6 +491,63 @@ def obsidian_publish():
     }), (200 if ok else 500)
 
 
+# ── vLLM warm-up ─────────────────────────────────────────────────────────────
+# The vLLM server (Modal, with memory snapshots) goes cold when idle. A chat
+# completion is the truest "is it serving?" probe: it requires the engine to be
+# awake, so the first call after idle triggers the snapshot restore + wake_up
+# and can block for a minute or more. We time it and report cold vs already-warm.
+VLLM_BASE_URL    = os.environ.get("VLLM_BASE_URL", "")       # e.g. https://<ws>--vllm-inference-vllmserver-serve.modal.run
+VLLM_API_KEY     = os.environ.get("VLLM_API_KEY", "")
+VLLM_MODEL       = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")  # default served id; skips /v1/models discovery so a cold start can't time out the warm-up
+VLLM_WARM_TIMEOUT = int(os.environ.get("VLLM_WARM_TIMEOUT", "720"))
+
+@app.route("/api/vllm/warm", methods=["POST"])
+@require_api_key
+def vllm_warm():
+    if not VLLM_BASE_URL:
+        return jsonify({"ok": False, "error": "VLLM_BASE_URL not set"}), 500
+    base = VLLM_BASE_URL.rstrip("/")
+    headers = {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
+
+    # Discover the served model id (vLLM rejects completions for an unknown model).
+    model = VLLM_MODEL
+    if not model:
+        try:
+            # Cold servers wake on this request too, so allow the full warm timeout.
+            r = requests.get(f"{base}/v1/models", headers=headers, timeout=VLLM_WARM_TIMEOUT)
+            r.raise_for_status()
+            model = r.json()["data"][0]["id"]
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Could not list models: {e}"}), 502
+
+    payload = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
+    start = time.monotonic()
+    try:
+        r = requests.post(
+            f"{base}/v1/chat/completions",
+            json=payload, headers=headers, timeout=VLLM_WARM_TIMEOUT,
+        )
+        r.raise_for_status()
+    except requests.Timeout:
+        return jsonify({
+            "ok": False, "model": model,
+            "error": f"Still warming after {VLLM_WARM_TIMEOUT}s — hit it again to keep waiting",
+        }), 504
+    except Exception as e:
+        return jsonify({"ok": False, "model": model, "error": str(e)}), 502
+
+    elapsed = round(time.monotonic() - start, 1)
+    cold = elapsed > 10  # a warm replica answers in well under a second
+    short = model.split("/")[-1]
+    return jsonify({
+        "ok": True,
+        "model": model,
+        "elapsed": elapsed,
+        "state": "cold start" if cold else "already warm",
+        "message": f"{short} is warm — responded in {elapsed:.1f}s ({'cold start' if cold else 'already warm'})",
+    })
+
+
 # ── Claude Code usage ────────────────────────────────────────────────────────
 # Claude Code writes per-session transcripts to ~/.claude/projects/**/*.jsonl.
 # Each assistant line carries a top-level ISO `timestamp`, `message.model`, and
@@ -601,6 +669,153 @@ def claude_code_usage():
         "by_model": by_model,
         "limit": CLAUDE_WINDOW_TOKEN_LIMIT,
     })
+
+
+# ── Static demo snapshot ────────────────────────────────────────────────
+# Captures the live JSON from every read endpoint, bakes it into a
+# self-contained copy of the dashboard whose fetch() is shimmed to serve the
+# captured data (and fake the POST actions), and deploys that copy to
+# Cloudflare Pages via wrangler.
+
+DEMO_DECK        = "Mandarin HSK 1000-5000"
+SNAPSHOT_DIR     = os.environ.get("SNAPSHOT_DIR", "demo")
+CF_PAGES_PROJECT = os.environ.get("CF_PAGES_PROJECT", "dashboard-demo")
+# Production branch the custom domain (dashboard.evanyoung.dev) serves, and the
+# canonical public URL to report back after a deploy.
+CF_PAGES_BRANCH  = os.environ.get("CF_PAGES_BRANCH", "main")
+CF_PAGES_URL     = os.environ.get("CF_PAGES_URL", "https://dashboard.evanyoung.dev")
+
+# Injected just before the dashboard's own <script>. Overrides fetch() so all
+# /api reads return the captured snapshot and all POST actions resolve as a
+# believable success — the live client-side clock keeps ticking untouched.
+DEMO_SHIM = """<script>
+/* ── Static demo shim — injected at snapshot build time ─────────────── */
+(function () {
+  const MOCK = __MOCK_JSON__;
+  const resp = (o) => new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  const nap  = (ms) => new Promise((r) => setTimeout(r, ms));
+  const real = window.fetch.bind(window);
+
+  window.fetch = async function (input, opts = {}) {
+    const url  = typeof input === 'string' ? input : (input && input.url) || '';
+    const [path, qs] = url.split('?');
+    const q    = new URLSearchParams(qs || '');
+    const method = (opts.method || 'GET').toUpperCase();
+    await nap(160 + Math.random() * 220);
+
+    if (method === 'POST') {
+      if (path === '/api/slackdump/backup')
+        return resp({ ok: true, stdout: 'Dispatched backup workflow → slackdump-pipeline (run #482)', stderr: '' });
+      if (path === '/api/obsidian/publish')
+        return resp({ ok: true, pr_url: 'https://github.com/EvanDavidYoung/obsidian-notes/pull/128', output: 'Published 342 notes · opened PR #128' });
+      if (path === '/api/vllm/warm') { await nap(2400); return resp({ ok: true, message: 'Warm in 41.2s (cold start · snapshot restored)' }); }
+      return resp({ ok: true });          // /sync, /api/podcasts/sync, /api/snapshot/publish …
+    }
+
+    if (path === '/api/weather')     return resp(MOCK.weather[q.get('loc') || 'ny'] || MOCK.weather.ny);
+    if (path === '/api/today')       return resp(MOCK.today);
+    if (path === '/api/total-time')  return resp(MOCK.total_time);
+    if (path === '/api/stats')       return resp(MOCK.stats[q.get('year')] || { heatmap: {} });
+    if (path === '/api/usage/claude-code') return resp(MOCK.usage);
+    if (path === '/api/podcasts') {
+      const y = q.get('year');
+      if (!y) return resp(MOCK.podcasts_all);
+      return resp(MOCK.podcasts[y] || { total_hours: 0, feeds: [], heatmap: {} });
+    }
+    return real(input, opts);           // let anything else (CDN) through
+  };
+
+  // Cosmetic: mark it as a demo, drop the publish button (no backend here).
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('snapshot-widget')?.remove();
+    const h1 = document.querySelector('.dash-header h1');
+    if (h1 && MOCK.captured_at) {
+      const badge = document.createElement('span');
+      badge.textContent = 'DEMO · ' + MOCK.captured_at;
+      badge.style.cssText = 'margin-left:10px;font-size:0.6rem;font-weight:700;letter-spacing:.08em;' +
+        'text-transform:uppercase;color:var(--fg4);border:1px solid var(--bg2);border-radius:10px;padding:2px 8px;vertical-align:middle;';
+      h1.appendChild(badge);
+    }
+  });
+})();
+</script>
+"""
+
+
+def build_snapshot_html(overrides=None):
+    """Render a self-contained demo copy of the dashboard from live endpoint data."""
+    year  = datetime.now().year
+    years = [year, year - 1]
+    client = app.test_client()
+
+    def g(path, **qs):
+        return client.get(path, query_string=qs).get_json()
+
+    data = {
+        "captured_at":  datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "weather":      {loc: g("/api/weather", loc=loc) for loc in WEATHER_LOCATIONS},
+        "today":        g("/api/today", deck=DEMO_DECK),
+        "total_time":   g("/api/total-time", deck=DEMO_DECK),
+        "stats":        {str(y): g("/api/stats", deck=DEMO_DECK, year=y) for y in years},
+        "podcasts":     {str(y): g("/api/podcasts", year=y) for y in years},
+        "podcasts_all": g("/api/podcasts"),
+        "usage":        g("/api/usage/claude-code"),
+    }
+    if overrides:
+        data.update(overrides)
+
+    with app.app_context():
+        tpl = render_template("index.html")
+    shim = DEMO_SHIM.replace("__MOCK_JSON__", json.dumps(data))
+    # Inject the shim immediately before the dashboard's own inline script.
+    marker = "<script>\n'use strict';"
+    if marker not in tpl:
+        raise RuntimeError("could not find dashboard <script> injection point")
+    return tpl.replace(marker, shim + marker, 1)
+
+
+@app.route("/api/snapshot/publish", methods=["POST"])
+@require_api_key
+def snapshot_publish():
+    try:
+        html = build_snapshot_html()
+    except Exception as e:  # capture (Anki/network) failure
+        return jsonify({"ok": False, "error": f"snapshot capture failed: {e}"}), 500
+
+    out_dir = os.path.join(app.root_path, SNAPSHOT_DIR)
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as f:
+        f.write(html)
+
+    # Also publish the static clock-glyph test page (served at /test). It's
+    # fully client-side, so a plain copy is all that's needed.
+    test_src = os.path.join(app.root_path, "test", "clock-glyphs.html")
+    if os.path.exists(test_src):
+        shutil.copyfile(test_src, os.path.join(out_dir, "test.html"))
+
+    # Always target the production branch so the custom domain reflects the deploy.
+    cmd = ["npx", "--yes", "wrangler", "pages", "deploy", out_dir,
+           f"--project-name={CF_PAGES_PROJECT}", f"--branch={CF_PAGES_BRANCH}",
+           "--commit-dirty=true"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=420, cwd=app.root_path)
+    except FileNotFoundError:
+        return jsonify({"ok": False,
+                        "error": "npx/wrangler not found — install Node.js, then `npm i -g wrangler`"}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "error": "wrangler deploy timed out after 7 min"}), 504
+
+    output = (proc.stdout + "\n" + proc.stderr).strip()
+    if proc.returncode != 0:
+        return jsonify({"ok": False, "error": "wrangler deploy failed", "output": output}), 500
+
+    # The custom domain always serves the production deploy; report it as the
+    # canonical URL, and include the per-deploy preview URL for reference.
+    previews = re.findall(r"https://[^\s]+\.pages\.dev", output)
+    return jsonify({"ok": True, "url": CF_PAGES_URL,
+                    "preview_url": previews[-1] if previews else None,
+                    "output": output})
 
 
 if __name__ == "__main__":

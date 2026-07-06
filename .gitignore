@@ -16,3 +16,7 @@ auth.json
 # Data files (large / contain personal data)
 *.db
 archive/
+
+# OS / tooling
+.DS_Store
+.wrangler/
