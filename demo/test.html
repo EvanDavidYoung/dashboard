@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clock glyph variants — day/night gradient preview</title>
+<style>
+  :root {
+    --bg-hard: #1d2021;
+    --bg:      #282828;
+    --bg1:     #3c3836;
+    --bg2:     #504945;
+    --fg:      #ebdbb2;
+    --fg2:     #bdae93;
+    --fg4:     #928374;
+    --blue:    #83a598;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg-hard);
+    color: var(--fg);
+    padding: 28px 20px 60px;
+    line-height: 1.4;
+  }
+  h1 { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
+  .lede { color: var(--fg4); font-size: 0.85rem; margin-bottom: 28px; max-width: 720px; }
+  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--fg4); margin: 34px 0 12px; }
+  .panel {
+    background: var(--bg);
+    border: 1px solid var(--bg1);
+    border-radius: 12px;
+    padding: 18px 16px;
+  }
+  .section-note { font-size: 0.78rem; color: var(--fg4); margin: 4px 0 14px; }
+
+  /* Shared clock row */
+  .clock-row {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .clock-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-width: 92px;
+    flex: 1;
+  }
+  .clock-city {
+    font-size: 0.68rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--fg4);
+    font-weight: 600;
+  }
+  .clock-time { font-size: 1.02rem; font-weight: 700; color: var(--fg);
+    font-variant-numeric: tabular-nums; }
+  .clock-ampm { font-size: 0.62rem; font-weight: 700; color: var(--fg4); }
+
+  /* ── Variant A — emoji + gradient pill ── */
+  .glyph-a {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px 5px 9px;
+    border-radius: 999px;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,.45);
+    box-shadow: 0 1px 3px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.08);
+  }
+  .glyph-a .emoji { font-size: 1.05rem; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.3));
+    display: inline-flex; justify-content: center; width: 1.2em; flex: none; }
+  .glyph-a .t     { font-size: 0.92rem; font-weight: 700; font-variant-numeric: tabular-nums;
+    display: inline-block; min-width: 4.6ch; text-align: center; }
+  .glyph-a .ap    { font-size: 0.6rem; font-weight: 700; opacity: .85; }
+
+  /* ── Variant B — CSS sky disc ── */
+  .glyph-b {
+    position: relative;
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .glyph-b .horizon {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 34%;
+    background: linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.32));
+  }
+  .glyph-b .body {
+    position: absolute;
+    width: 20px; height: 20px;
+    left: 50%; transform: translate(-50%, -50%);
+    border-radius: 50%;
+    transition: none;
+  }
+  .disc-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .disc-time { font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .disc-ap   { font-size: 0.58rem; font-weight: 700; color: var(--fg4); }
+
+  .live-badge {
+    display: inline-block; font-size: 0.66rem; color: var(--blue);
+    border: 1px solid var(--bg2); border-radius: 6px; padding: 1px 6px; margin-left: 8px;
+    vertical-align: middle;
+  }
+  .anim-controls {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--bg1);
+  }
+  .anim-ctl-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--fg4); font-weight: 600; }
+  #speed-slider { flex: 1; max-width: 360px; accent-color: var(--blue); cursor: pointer; }
+  #speed-label { font-size: 0.85rem; color: var(--fg); font-variant-numeric: tabular-nums;
+    min-width: 52px; }
+
+  .gradient-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .swatch { text-align: center; font-size: 0.62rem; color: var(--fg4); }
+  .swatch .box { width: 84px; height: 34px; border-radius: 7px; margin-bottom: 4px;
+    border: 1px solid rgba(255,255,255,.08); }
+</style>
+</head>
+<body>
+  <h1>Clock glyph variants</h1>
+  <p class="lede">
+    Two ways to render each city's day/night state as a gradient that smoothly
+    transitions through <b>night → sunrise → day → sunset</b> from the local hour.
+    The <b>Live</b> rows use each city's real current time; the rows below sweep
+    synthetic times so you can see every phase at once. Pick the variant you prefer.
+  </p>
+
+  <h2>24-hour animation <span class="live-badge">adjustable · up to 1500×</span></h2>
+  <p class="section-note">Both variants sweeping a full day. Virtual clock: <b id="anim-clock">—</b></p>
+  <div class="panel">
+    <div class="anim-controls">
+      <span class="anim-ctl-label">Speed</span>
+      <input type="range" id="speed-slider" min="60" max="1500" step="20" value="480">
+      <b id="speed-label">480×</b>
+    </div>
+    <div class="clock-row" id="anim-row"></div>
+  </div>
+
+  <h2>Variant A — emoji + gradient pill <span class="live-badge">live</span></h2>
+  <div class="panel"><div class="clock-row" id="live-a"></div></div>
+
+  <h2>Variant B — CSS sky disc <span class="live-badge">live</span></h2>
+  <div class="panel"><div class="clock-row" id="live-b"></div></div>
+
+  <h2>Phase sweep — Variant A</h2>
+  <p class="section-note">Same city (NY) at fixed times, so night · sunrise · day · sunset · night are all visible.</p>
+  <div class="panel"><div class="clock-row" id="sweep-a"></div></div>
+
+  <h2>Phase sweep — Variant B</h2>
+  <p class="section-note">Same city (NY) at fixed times. The sun arcs to midday; at night the phase-accurate moon rises and peaks at midnight.</p>
+  <div class="panel"><div class="clock-row" id="sweep-b"></div></div>
+
+  <h2>Raw sky gradient across 24h</h2>
+  <div class="panel">
+    <div class="gradient-strip" id="grad-strip"></div>
+  </div>
+
+<script>
+  // ── Cities ────────────────────────────────────────────────
+  const CITIES = [
+    { label: "Taiwan", zone: "Asia/Taipei",        lat: 25.033, lon: 121.565 },
+    { label: "SF",     zone: "America/Los_Angeles", lat: 37.775, lon: -122.418 },
+    { label: "TX",     zone: "America/Chicago",     lat: 30.267, lon: -97.743 },
+    { label: "NY",     zone: "America/New_York",    lat: 40.713, lon: -74.006 },
+  ];
+
+  // ── Time → sky model (shared by both variants) ────────────
+  // Keyframe anchors at night(0/24), sunrise(6), day(12), sunset(18).
+  // Narrow sunrise/sunset bands; night & day held broad so 3am stays dark
+  // and 10pm doesn't drift into sunset colors.
+  const STOPS = [
+    { h: 0,    top: [11,16,38],   bot: [29,34,51]  },  // night   #0b1026 / #1d2233
+    { h: 4.5,  top: [16,22,52],   bot: [36,42,66]  },  // late night
+    { h: 6,    top: [245,169,127],bot: [255,209,148]}, // sunrise #f5a97f / #ffd194
+    { h: 7.5,  top: [118,195,172],bot: [170,222,205]}, // day begins (brighter/saturated gruvbox blue #83a598)
+    { h: 12,   top: [118,195,172],bot: [170,222,205]}, // midday peak
+    { h: 16.5, top: [118,195,172],bot: [170,222,205]}, // afternoon peak
+    { h: 18,   top: [254,128,25], bot: [143,63,113] }, // sunset   gruvbox #fe8019 / #8f3f71
+    { h: 19.5, top: [20,24,54],   bot: [34,40,64]  },  // dusk → night
+    { h: 24,   top: [11,16,38],   bot: [29,34,51]  },  // night
+  ];
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const mix  = (a, b, t) => a.map((v, i) => Math.round(lerp(v, b[i], t)));
+  const rgb  = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+  function sky(h) {
+    h = ((h % 24) + 24) % 24;
+    for (let i = 0; i < STOPS.length - 1; i++) {
+      const a = STOPS[i], b = STOPS[i + 1];
+      if (h >= a.h && h <= b.h) {
+        const t = (h - a.h) / (b.h - a.h);
+        return { top: mix(a.top, b.top, t), bot: mix(a.bot, b.bot, t) };
+      }
+    }
+    return { top: STOPS[0].top, bot: STOPS[0].bot };
+  }
+
+  // Emoji phase for variant A
+  function phaseEmoji(h) {
+    if (h >= 5 && h < 7.5)  return "🌅";   // sunrise
+    if (h >= 7.5 && h < 16.5) return "☀️"; // day
+    if (h >= 16.5 && h < 19.5) return "🌇"; // sunset
+    return "🌙";                            // night
+  }
+
+  // Sun/moon dot for variant B: vertical position + color.
+  // 0 at bottom (horizon) → 1 at top (noon). Below horizon at deep night.
+  function bodyPos(h) {
+    // Day arc peaks at 12, touches horizon ~6 and ~18.
+    const arc = Math.sin(((h - 6) / 12) * Math.PI); // +1 at noon, 0 at 6/18, negative at night
+    return arc; // range roughly [-1, 1]
+  }
+  function isDaytime(h) { return h >= 6 && h < 18; }
+
+  function fmtTime(h) {
+    const hr = Math.floor(h), min = Math.round((h - hr) * 60);
+    const ap = hr < 12 ? "AM" : "PM";
+    let h12 = hr % 12; if (h12 === 0) h12 = 12;
+    return { t: `${h12}:${String(min).padStart(2, "0")}`, ap };
+  }
+
+  // Local fractional hour for a timezone (of a given instant)
+  function localHour(zone, date = new Date()) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone, hour: "numeric", minute: "numeric", second: "numeric", hour12: false,
+    }).formatToParts(date);
+    const g = (t) => Number(parts.find((p) => p.type === t).value);
+    let hr = g("hour"); if (hr === 24) hr = 0;
+    return hr + g("minute") / 60 + g("second") / 3600;
+  }
+
+  // ── Real sunrise/sunset + moon phase (ported from the dashboard) ──────────
+  // Remap real local hour → "solar hour" where sunrise→6, sunset→18.
+  function solarHour(h, sr, ss) {
+    if (h >= sr && h < ss) return 6 + ((h - sr) / (ss - sr)) * 12;
+    const nightLen = 24 - (ss - sr);
+    const t = h >= ss ? h - ss : h + 24 - ss;
+    let solar = 18 + (t / nightLen) * 12;
+    if (solar >= 24) solar -= 24;
+    return solar;
+  }
+
+  // Sunrise/sunset for the current day at lat/lon (SunCalc-style). Returns Dates (UTC).
+  function sunTimes(lat, lon, date = new Date()) {
+    const rad = Math.PI / 180, dayMs = 86400000, J1970 = 2440588, J2000 = 2451545;
+    const toDays = (d) => d.valueOf() / dayMs - 0.5 + J1970 - J2000;
+    const fromJ  = (j) => new Date((j + 0.5 - J1970) * dayMs);
+    const e  = rad * 23.4397, lw = rad * -lon, phi = rad * lat, d = toDays(date);
+    const eclLon = (Mn) => {
+      const C = rad * (1.9148 * Math.sin(Mn) + 0.02 * Math.sin(2 * Mn) + 0.0003 * Math.sin(3 * Mn));
+      return Mn + C + rad * 102.9372 + Math.PI;
+    };
+    const J0 = 0.0009;
+    const n  = Math.round(d - J0 - lw / (2 * Math.PI));
+    const ds = J0 + lw / (2 * Math.PI) + n;
+    const Ma = rad * (357.5291 + 0.98560028 * ds);
+    const L  = eclLon(Ma);
+    const dec = Math.asin(Math.sin(e) * Math.sin(L));
+    const Jnoon = J2000 + ds + 0.0053 * Math.sin(Ma) - 0.0069 * Math.sin(2 * L);
+    const h0 = -0.833 * rad;
+    const cosH = (Math.sin(h0) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+    const w = Math.acos(Math.max(-1, Math.min(1, cosH))) / (2 * Math.PI);
+    const Jset = J2000 + (J0 + (w * 2 * Math.PI + lw) / (2 * Math.PI) + n) + 0.0053 * Math.sin(Ma) - 0.0069 * Math.sin(2 * L);
+    return { sunrise: fromJ(Jnoon - (Jset - Jnoon)), sunset: fromJ(Jset) };
+  }
+
+  function moonPhase(date = new Date()) {
+    const synodic = 29.530588853, knownNew = Date.UTC(2000, 0, 6, 18, 14, 0);
+    let p = (((date.getTime() - knownNew) / 86400000) % synodic) / synodic;
+    if (p < 0) p += 1;
+    return p;
+  }
+  function moonName(p) {
+    for (const [t, n] of [
+      [0.02, "New Moon"], [0.24, "Waxing Crescent"], [0.28, "First Quarter"],
+      [0.47, "Waxing Gibbous"], [0.53, "Full Moon"], [0.72, "Waning Gibbous"],
+      [0.78, "Last Quarter"], [0.98, "Waning Crescent"],
+    ]) if (p < t) return n;
+    return "New Moon";
+  }
+  function moonSVG(p, size = 20) {
+    const r = 8.5;
+    const cosv = Math.cos(2 * Math.PI * p);
+    const rx = Math.max(0.01, Math.abs(cosv) * r);
+    const litRight = p < 0.5;
+    const limbSweep = litRight ? 1 : 0;
+    const termSweep = ((cosv > 0) === litRight) ? 0 : 1;
+    const d = `M0 ${-r} A ${r} ${r} 0 0 ${limbSweep} 0 ${r} A ${rx.toFixed(2)} ${r} 0 0 ${termSweep} 0 ${-r} Z`;
+    return `<svg viewBox="-10 -10 20 20" width="${size}" height="${size}" style="display:block">
+      <circle cx="0" cy="0" r="${r}" fill="#2f2f38" stroke="rgba(230,230,210,.28)" stroke-width="0.6"/>
+      <path d="${d}" fill="#f3f1e3"/>
+    </svg>`;
+  }
+
+  // ── Renderers ─────────────────────────────────────────────
+  function glyphA(h) {
+    const s = sky(h), f = fmtTime(h);
+    return `<span class="glyph-a" style="background:linear-gradient(135deg,${rgb(s.top)},${rgb(s.bot)})">
+      <span class="emoji">${phaseEmoji(h)}</span>
+      <span class="t">${f.t}</span><span class="ap">${f.ap}</span></span>`;
+  }
+
+  // sr/ss are real sunrise/sunset local hours (default 6/18 for synthetic sweeps).
+  function glyphB(h, sr = 6, ss = 18) {
+    const f = fmtTime(h);
+    const solar = solarHour(h, sr, ss);
+    const day = h >= sr && h < ss;
+    const s = sky(solar);
+    // Body center: high at solar noon/midnight, on the horizon (66%) at sunrise/sunset.
+    let centerPct;
+    if (day) {
+      centerPct = lerp(66, 18, bodyPos(solar));
+    } else {
+      // Night runs solar 18..30. Keep the moon fully below the horizon for a
+      // margin after sunset and before sunrise, then rise it. The arc bottoms
+      // out at 84% (just under the ocean line so nothing peeks) and peaks at
+      // solar midnight (18%).
+      const sn = solar < 6 ? solar + 24 : solar;
+      const m  = 0.12;                              // fraction of night hidden at each end
+      const u  = ((sn - 18) / 12 - m) / (1 - 2 * m);
+      centerPct = lerp(84, 18, Math.sin(u * Math.PI));
+    }
+    // Ocean: a subtle darker tint of the sky so the waterline is just barely distinct.
+    const tint  = (fn) => s.bot.map((v) => Math.round(v * fn));
+    const ocean = `linear-gradient(180deg,${rgb(tint(0.86))},${rgb(tint(0.72))})`;
+    const p = moonPhase();
+    const bodyBg = day
+      ? "background:radial-gradient(circle at 35% 35%, #fff6d6, #ffd447 60%, #ffb300);"
+      : "";
+    const bodyInner = day ? "" : moonSVG(p, 20);
+    const glow = day ? "0 0 12px 3px rgba(255,204,71,.55)" : "0 0 7px 1px rgba(220,222,200,.35)";
+    return `<div class="disc-wrap">
+      <div class="glyph-b" style="background:linear-gradient(180deg,${rgb(s.top)},${rgb(s.bot)})">
+        <div class="body" style="top:${centerPct}%;${bodyBg}box-shadow:${glow}">${bodyInner}</div>
+        <div class="horizon" style="background:${ocean}"></div>
+      </div>
+      <div class="disc-time">${f.t}</div><div class="disc-ap">${f.ap}</div>
+    </div>`;
+  }
+
+  function cell(label, inner) {
+    return `<div class="clock-cell"><span class="clock-city">${label}</span>${inner}</div>`;
+  }
+
+  // Live rows
+  function renderLive() {
+    const now = new Date();
+    document.getElementById("live-a").innerHTML =
+      CITIES.map((c) => cell(c.label, glyphA(localHour(c.zone, now)))).join("");
+    document.getElementById("live-b").innerHTML =
+      CITIES.map((c) => {
+        const t = sunTimes(c.lat, c.lon, now);
+        const sr = localHour(c.zone, t.sunrise), ss = localHour(c.zone, t.sunset);
+        return cell(c.label, glyphB(localHour(c.zone, now), sr, ss));
+      }).join("");
+  }
+
+  // Sweep rows (fixed times)
+  const SWEEP = [
+    { label: "03:00", h: 3 },
+    { label: "06:30", h: 6.5 },
+    { label: "12:00", h: 12 },
+    { label: "18:15", h: 18.25 },
+    { label: "22:00", h: 22 },
+  ];
+  document.getElementById("sweep-a").innerHTML =
+    SWEEP.map((s) => cell(s.label, glyphA(s.h))).join("");
+  document.getElementById("sweep-b").innerHTML =
+    SWEEP.map((s) => cell(s.label, glyphB(s.h))).join("");
+
+  // Gradient strip every 3h
+  document.getElementById("grad-strip").innerHTML =
+    Array.from({ length: 9 }, (_, i) => i * 3).map((h) => {
+      const s = sky(h);
+      return `<div class="swatch">
+        <div class="box" style="background:linear-gradient(135deg,${rgb(s.top)},${rgb(s.bot)})"></div>
+        ${String(h).padStart(2, "0")}:00</div>`;
+    }).join("");
+
+  renderLive();
+  setInterval(renderLive, 1000);
+
+  // 24h animation: speed is a real-time multiplier set by the slider (up to 1500×).
+  // Advance by elapsed wall-time so it glides smoothly rather than stepping.
+  const slider = document.getElementById("speed-slider");
+  const speedLabel = document.getElementById("speed-label");
+  let speedX = Number(slider.value);            // real-time multiplier
+  slider.addEventListener("input", () => {
+    speedX = Number(slider.value);
+    speedLabel.textContent = speedX + "×";
+  });
+  let vmin = 0, last = performance.now();       // virtual minutes since midnight
+  function renderAnim(now) {
+    // speedX× real time → speedX/60 virtual minutes elapse per real second.
+    vmin = (vmin + (now - last) / 1000 * (speedX / 60)) % 1440;
+    last = now;
+    const h = vmin / 60, f = fmtTime(h);
+    document.getElementById("anim-clock").textContent = `${f.t} ${f.ap}`;
+    document.getElementById("anim-row").innerHTML =
+      cell("Variant A", glyphA(h)) + cell("Variant B", glyphB(h));
+    requestAnimationFrame(renderAnim);
+  }
+  requestAnimationFrame(renderAnim);
+</script>
+</body>
+</html>

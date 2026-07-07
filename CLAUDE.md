@@ -17,6 +17,9 @@ Env vars:
 - `OVERCAST_AUTH` — path to overcast-to-sqlite auth cookie file (default: `auth.json`)
 - `OVERCAST_CLI` — overcast-to-sqlite binary name/path (default: `overcast-to-sqlite`)
 - `PORT` — server port (default: `5555`)
+- `CLAUDE_PROJECTS_DIR` — Claude Code transcript dir scanned for token usage (default: `~/.claude/projects`)
+- `CLAUDE_WINDOW_HOURS` — rolling usage-window length in hours (default: `5`)
+- `CLAUDE_WINDOW_TOKEN_LIMIT` — approximate per-window token budget for the progress bar (default: `20000000`); set to `0` to hide the bar
 
 ## Architecture
 
@@ -34,6 +37,7 @@ Env vars:
 | `GET /api/weather` | Proxies `wttr.in/{WEATHER_LOCATION}?format=j1`; no external API key needed |
 | `GET /api/podcasts?year=Y` | Per-show totals (all-time) + daily listening heatmap for the year |
 | `POST /api/podcasts/sync` | Shells out to `overcast-to-sqlite save`; pulls fresh data from Overcast; `require_api_key` |
+| `GET /api/usage/claude-code` | Reconstructs the current rolling token-usage window from `~/.claude/projects/**/*.jsonl` and returns totals + per-model breakdown; unauthenticated |
 
 All AnkiConnect calls go through `anki_request(action, **params)`, which POSTs to `http://localhost:8765` using the AnkiConnect v6 JSON protocol. Responses are flat lists: `[reviewTime_ms, cardId, usn, ease, ivl, lastIvl, factor, time_ms, type]` — key indices are `[0]` ts, `[3]` ease, `[5]` lastIvl, `[7]` time_ms, `[8]` type.
 
@@ -57,6 +61,9 @@ Self-contained SPA — vanilla JS, no framework, Gruvbox dark color scheme via C
 - `ChineseTotalWidget` — fetches `/api/total-time` + `/api/podcasts` in parallel; shows combined hours with Anki/listening breakdown
 - `PodcastWidget` — fetches `/api/podcasts?year=Y`; renders daily listening heatmap (orange/yellow) + per-show bar chart; year nav + ↺ button in header. The ↺ button calls `syncAndRefresh()`: hits `POST /api/podcasts/sync` first, then refreshes both `PodcastWidget` and `ChineseTotalWidget` in parallel.
 - `AnkiWidget` — fetches `/api/stats` for heatmap + `/api/total-time`; year nav only re-calls `refresh()` which updates the heatmap only
+- `ClaudeCodeWidget` — fetches `/api/usage/claude-code`; renders current-window token total, an optional progress bar (only when `CLAUDE_WINDOW_TOKEN_LIMIT > 0`), a reset countdown, and per-category/per-model chips. Lives in the Usage tab.
+
+**Tabs**: A `.tab-bar` of `.tab-btn[data-tab=…]` toggles `.tab-pane#tab-<name>`. Tabs: `main` (the dashboard widgets), `tools` (button-only actions: Slack Backup, Obsidian Publish — these are wired via direct `addEventListener`, NOT in the `WIDGETS` array), and `usage` (`ClaudeCodeWidget` + a static link card to `modal.com/settings/usage`, since Modal exposes no API for remaining credits). The Claude Code window/limit are *reconstructed/approximate* — transcripts don't store Anthropic's real reset time or token cap.
 
 **Heatmap**: Both the Anki and podcast heatmaps share `buildHeatmapGrid(gridEl, monthsEl, year, data, levelFn, cellClass, tooltipFmt)`. CSS class `.hm-grid` sets the 53×7 grid layout. `.hm-cell` uses a blue scale; `.phm-cell` uses an orange/yellow scale (thresholds: 0.5/1/1.5/2h). `startDow = (jan1.getDay() + 6) % 7` aligns Jan 1 to the correct day-of-week.
 
