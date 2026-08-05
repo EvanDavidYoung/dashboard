@@ -28,10 +28,24 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import requests
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 load_dotenv()  # read key=value pairs from a local .env into os.environ
+_ENV_FILE = dotenv_values()  # same pairs, but unshadowed by the ambient shell
+
+
+def env_file_first(name, default=""):
+    """Config where the project .env outranks an inherited shell variable.
+
+    load_dotenv() never overwrites a variable that is already exported, so a
+    stale global wins silently. ~/.zshenv exports VLLM_API_KEY for a *different*
+    (opencode / vllm-secondbrain) endpoint, which is not the credential this app
+    wants. Use this for the VLLM_* group so .env is the source of truth; plain
+    os.environ.get elsewhere keeps `FOO=bar uv run python server.py` working.
+    """
+    val = _ENV_FILE.get(name)
+    return val if val not in (None, "") else os.environ.get(name, default)
 
 app = Flask(__name__)
 
@@ -492,49 +506,82 @@ def obsidian_publish():
 
 
 # ── vLLM warm-up ─────────────────────────────────────────────────────────────
-# The vLLM server (Modal, with memory snapshots) goes cold when idle. A chat
-# completion is the truest "is it serving?" probe: it requires the engine to be
-# awake, so the first call after idle triggers the snapshot restore + wake_up
-# and can block for a minute or more. We time it and report cold vs already-warm.
-VLLM_BASE_URL    = os.environ.get("VLLM_BASE_URL", "")       # e.g. https://<ws>--vllm-inference-vllmserver-serve.modal.run
-VLLM_API_KEY     = os.environ.get("VLLM_API_KEY", "")
-VLLM_MODEL       = os.environ.get("VLLM_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")  # default served id; skips /v1/models discovery so a cold start can't time out the warm-up
-VLLM_WARM_TIMEOUT = int(os.environ.get("VLLM_WARM_TIMEOUT", "720"))
+# The inference server (Modal) goes cold when idle. A chat completion is the
+# truest "is it serving?" probe: it requires the engine to be awake.
+#
+# Modal Endpoints do NOT hold the connection open during a cold start — their
+# edge proxy returns an immediate 503 with an empty body until the container's
+# HTTP server binds, which for a big MoE checkpoint is minutes (weight load +
+# KV alloc + FlashInfer autotune). So we cannot just set a long socket timeout
+# and wait; we have to poll until the upstream comes up.
+VLLM_BASE_URL    = env_file_first("VLLM_BASE_URL")       # host root or an OpenAI-style base ending in /v1 — both accepted
+VLLM_API_KEY     = env_file_first("VLLM_API_KEY")
+VLLM_MODEL       = env_file_first("VLLM_MODEL", "Qwen/Qwen3.6-35B-A3B")  # served id; skips /v1/models discovery
+VLLM_WARM_TIMEOUT = int(env_file_first("VLLM_WARM_TIMEOUT", "720"))
+VLLM_POLL_INTERVAL = float(env_file_first("VLLM_POLL_INTERVAL", "5"))
+
+# Booting-upstream signals: Modal's proxy 503s, and some fronts use 502/504.
+_VLLM_BOOTING_STATUS = {502, 503, 504}
+
+
+def _vllm_api_root(url):
+    """Return the OpenAI API root (…/v1) whether or not the configured URL has it."""
+    base = url.rstrip("/")
+    return base if base.endswith("/v1") else f"{base}/v1"
+
 
 @app.route("/api/vllm/warm", methods=["POST"])
 @require_api_key
 def vllm_warm():
     if not VLLM_BASE_URL:
         return jsonify({"ok": False, "error": "VLLM_BASE_URL not set"}), 500
-    base = VLLM_BASE_URL.rstrip("/")
-    headers = {"Authorization": f"Bearer {VLLM_API_KEY}"} if VLLM_API_KEY else {}
+    base = _vllm_api_root(VLLM_BASE_URL)
+    # Modal accepts the combined proxy token as a bearer credential.
+    headers = {"Authorization": f"Bearer {VLLM_API_KEY.strip()}"} if VLLM_API_KEY else {}
 
-    # Discover the served model id (vLLM rejects completions for an unknown model).
     model = VLLM_MODEL
-    if not model:
-        try:
-            # Cold servers wake on this request too, so allow the full warm timeout.
-            r = requests.get(f"{base}/v1/models", headers=headers, timeout=VLLM_WARM_TIMEOUT)
-            r.raise_for_status()
-            model = r.json()["data"][0]["id"]
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Could not list models: {e}"}), 502
-
     payload = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
     start = time.monotonic()
-    try:
-        r = requests.post(
-            f"{base}/v1/chat/completions",
-            json=payload, headers=headers, timeout=VLLM_WARM_TIMEOUT,
-        )
-        r.raise_for_status()
-    except requests.Timeout:
-        return jsonify({
-            "ok": False, "model": model,
-            "error": f"Still warming after {VLLM_WARM_TIMEOUT}s — hit it again to keep waiting",
-        }), 504
-    except Exception as e:
-        return jsonify({"ok": False, "model": model, "error": str(e)}), 502
+    deadline = start + VLLM_WARM_TIMEOUT
+    attempts = 0
+    last = ""
+
+    # Poll past "still booting" responses until the engine answers or we run out
+    # of time. Each individual request still gets a generous socket timeout, so
+    # this also handles fronts that *do* hold the connection open.
+    while True:
+        attempts += 1
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return jsonify({
+                "ok": False, "model": model, "attempts": attempts - 1,
+                "elapsed": round(time.monotonic() - start, 1),
+                "error": f"Still warming after {VLLM_WARM_TIMEOUT}s ({last}) — hit it again to keep waiting",
+            }), 504
+        try:
+            r = requests.post(
+                f"{base}/chat/completions",
+                json=payload, headers=headers, timeout=min(remaining, 120),
+            )
+        except requests.Timeout:
+            last = "request timed out"
+        except Exception as e:
+            return jsonify({"ok": False, "model": model, "error": str(e)}), 502
+        else:
+            if r.status_code == 200:
+                break
+            if r.status_code not in _VLLM_BOOTING_STATUS:
+                # A real error (401 bad key, 404 wrong path, 400 wrong model id) —
+                # polling will never fix it, so surface it immediately.
+                detail = (r.text or "").strip()[:300] or "(empty body)"
+                return jsonify({
+                    "ok": False, "model": model,
+                    "error": f"HTTP {r.status_code} from {base}/chat/completions: {detail}",
+                }), 502
+            last = f"HTTP {r.status_code}, still booting"
+
+        if time.monotonic() + VLLM_POLL_INTERVAL < deadline:
+            time.sleep(VLLM_POLL_INTERVAL)
 
     elapsed = round(time.monotonic() - start, 1)
     cold = elapsed > 10  # a warm replica answers in well under a second
@@ -543,6 +590,7 @@ def vllm_warm():
         "ok": True,
         "model": model,
         "elapsed": elapsed,
+        "attempts": attempts,
         "state": "cold start" if cold else "already warm",
         "message": f"{short} is warm — responded in {elapsed:.1f}s ({'cold start' if cold else 'already warm'})",
     })

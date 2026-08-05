@@ -20,6 +20,13 @@ Env vars:
 - `CLAUDE_PROJECTS_DIR` — Claude Code transcript dir scanned for token usage (default: `~/.claude/projects`)
 - `CLAUDE_WINDOW_HOURS` — rolling usage-window length in hours (default: `5`)
 - `CLAUDE_WINDOW_TOKEN_LIMIT` — approximate per-window token budget for the progress bar (default: `20000000`); set to `0` to hide the bar
+- `VLLM_BASE_URL` — inference endpoint; accepts a host root *or* a base already ending in `/v1`
+- `VLLM_API_KEY` — sent as `Authorization: Bearer …`; for a Modal Endpoint this is the combined `wk-<id>.ws-<secret>` proxy token
+- `VLLM_MODEL` — served model id (default: `Qwen/Qwen3.6-35B-A3B`)
+- `VLLM_WARM_TIMEOUT` — total seconds to keep polling a cold endpoint (default: `720`)
+- `VLLM_POLL_INTERVAL` — seconds between warm-up polls (default: `5`)
+
+The `VLLM_*` group is read from `.env` *before* the ambient shell (`env_file_first()` in `server.py`), because `~/.zshenv` exports a stale `VLLM_API_KEY` for a different endpoint and `load_dotenv()` will not overwrite an already-exported variable. Every other var uses normal precedence, so `FOO=bar uv run python server.py` still works.
 
 ## Architecture
 
